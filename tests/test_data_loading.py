@@ -1,3 +1,4 @@
+import multiprocessing
 import tempfile
 import threading
 import unittest
@@ -99,4 +100,3 @@ class PersistenceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-import multiprocessing
