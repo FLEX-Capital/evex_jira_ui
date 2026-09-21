@@ -6,10 +6,7 @@ Customer/branch columns are reference IDs, not enriched customer records.
 """
 
 import argparse
-import shutil
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
-from pathlib import Path
 
 import requests
 
@@ -55,19 +52,18 @@ def migrate_categories(frame, *, fetch=fetch_asset_object, workers=4):
 
 
 def main():
-    from data_loading import DATA_PATH, load_data, save_data
+    from data_loading import load_data_snapshot, save_data_if_unchanged
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workers", type=int, default=4)
     args = parser.parse_args()
     if args.workers < 1:
         parser.error("--workers must be positive")
-    frame = load_data()
+    frame, revision = load_data_snapshot()
     if frame is None or frame.empty:
         print("No cached categories to migrate.")
         return
     # Refuse a stale overwrite if another process refreshed during the API reads.
-    original = Path(DATA_PATH).stat()
     result, report = migrate_categories(frame, workers=args.workers)
     if report["failed_objects"]:
         raise SystemExit(
@@ -75,17 +71,7 @@ def main():
             "failed. Check Assets schema/object-type permissions for the account "
             "configured as JIRA_USERNAME and retry."
         )
-    current = Path(DATA_PATH).stat()
-    if (current.st_mtime_ns, current.st_size) != (
-        original.st_mtime_ns,
-        original.st_size,
-    ):
-        raise RuntimeError(
-            "Cache changed during migration; rerun while refresh is idle."
-        )
-    backup = f"{DATA_PATH}.bak-assets-{datetime.now(UTC):%Y%m%d-%H%M%S-%f}"
-    shutil.copy2(DATA_PATH, backup)
-    save_data(result)
+    backup = save_data_if_unchanged(result, revision, backup_prefix="assets")
     print(f"Cache backup: {backup}")
     print(f"Category migration: {report}")
 

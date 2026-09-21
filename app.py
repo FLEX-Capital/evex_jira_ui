@@ -10,7 +10,11 @@ import streamlit as st
 from st_aggrid import AgGrid, GridOptionsBuilder
 
 from asset_country import NOT_RESOLVED, refresh_countries, save_cache
-from data_loading import load_data, save_data
+from data_loading import (
+    CacheChangedError,
+    load_data_snapshot,
+    save_data_if_unchanged,
+)
 from interactive import render_interactive
 from plotting import (
     apply_font,
@@ -72,8 +76,9 @@ selected_companies = st.sidebar.multiselect(
     "Firma", COMPANY_LABELS, default=COMPANY_LABELS
 )
 
+cache_revision = None
 try:
-    df_old = load_data()
+    df_old, cache_revision = load_data_snapshot()
     df = df_old.copy()
     # make sure column clone_in_project is there
     if "clone_in_project" not in df.columns:
@@ -150,7 +155,11 @@ if st.sidebar.button("🔄 aktualisieren"):
             )
         except Exception as exc:  # noqa: BLE001 - report optional/isolated failures
             st.sidebar.warning(f"Ursprung-Abgleich fehlgeschlagen: {exc}")
-        save_data(df)
+        try:
+            save_data_if_unchanged(df, cache_revision)
+        except CacheChangedError as exc:
+            st.sidebar.error(str(exc))
+            st.stop()
         if not result.errors and not any(result.asset_failures.values()):
             st.sidebar.success(
                 f"Aktualisierung abgeschlossen: {len(df)} Tickets gespeichert."
@@ -782,8 +791,9 @@ with tab_interactive:
     if refresh_sources:
         try:
             with st.spinner("Fehlende Ursprünge werden mit Jira abgeglichen …"):
-                cached_df, sources_updated = refresh_missing_sources(load_data())
-                save_data(cached_df)
+                cached_df, revision = load_data_snapshot()
+                cached_df, sources_updated = refresh_missing_sources(cached_df)
+                save_data_if_unchanged(cached_df, revision)
             st.session_state["source_sync_success"] = sources_updated
         except Exception as exc:  # noqa: BLE001 - report optional/isolated failures
             st.error(f"Ursprung-Abgleich fehlgeschlagen: {exc}")
@@ -796,7 +806,7 @@ with tab_interactive:
             # current window still needs its Land, and rewriting only the
             # visible rows would leave the rest stale.
             with st.spinner("Assets werden aufgelöst und Länder neu zugeordnet …"):
-                cached_df = load_data()
+                cached_df, revision = load_data_snapshot()
                 before = (
                     cached_df["Land"]
                     if "Land" in cached_df.columns
@@ -804,7 +814,7 @@ with tab_interactive:
                 )
                 cached_df, cache, stats = refresh_countries(cached_df)
                 save_cache(cache)
-                save_data(cached_df)
+                save_data_if_unchanged(cached_df, revision)
             stats["rows"] = int((cached_df["Land"] != before).sum())
             stats["pending"] = int((cached_df["Land"] == NOT_RESOLVED).sum())
             st.session_state["country_sync_success"] = stats

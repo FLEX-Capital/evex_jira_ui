@@ -13,7 +13,7 @@ import argparse
 import os
 import shutil
 import tempfile
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -28,7 +28,13 @@ from asset_country import (
     refresh_countries,
     save_cache,
 )
-from data_loading import DATA_PATH, save_data
+from data_loading import (
+    DATA_PATH,
+    CacheChangedError,
+    cache_lock,
+    cache_revision,
+    save_data,
+)
 from resolution_bands import classify_bands
 
 DEFAULT_INPUT = "data/jira_data.pkl"
@@ -117,7 +123,9 @@ def main():
     output = args.output or args.input
 
     # Deserializing our own locally-generated pickle, not untrusted input.
-    df = pd.read_pickle(args.input)  # nosec B301
+    with cache_lock(output):
+        revision = cache_revision(output)
+        df = pd.read_pickle(args.input)  # nosec B301
     print(f"Loaded {len(df)} tickets from {args.input}")
 
     absent = [c for c in ESCALATION_COLUMNS if c not in df.columns]
@@ -169,15 +177,18 @@ def main():
         print("Dry run - nothing written.")
         return
 
-    save_cache(cache, args.cache)
-    # Same path test as write_pickle_atomically(), which routes the live cache
-    # through save_data(). Comparing raw strings here instead would let
-    # `--output ./data/jira_data.pkl` overwrite the cache with no backup.
-    if os.path.abspath(output) == os.path.abspath(args.input):
-        backup = f"{args.input}.bak-{datetime.now():%Y%m%d-%H%M%S}"
-        shutil.copy2(args.input, backup)
-        print(f"Backup written to {backup}")
-    write_pickle_atomically(df, output)
+    with cache_lock(output):
+        if cache_revision(output) != revision:
+            raise CacheChangedError("Cache changed during country backfill; rerun.")
+        save_cache(cache, args.cache)
+        # Same path test as write_pickle_atomically(), which routes the live cache
+        # through save_data(). Comparing raw strings here instead would let
+        # `--output ./data/jira_data.pkl` overwrite the cache with no backup.
+        if os.path.abspath(output) == os.path.abspath(args.input):
+            backup = f"{args.input}.bak-{datetime.now(UTC):%Y%m%d-%H%M%S-%f}"
+            shutil.copy2(args.input, backup)
+            print(f"Backup written to {backup}")
+        write_pickle_atomically(df, output)
     print(f"Wrote {len(df)} tickets to {output}")
 
 

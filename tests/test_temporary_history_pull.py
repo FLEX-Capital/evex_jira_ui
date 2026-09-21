@@ -12,6 +12,47 @@ import temporary_history_pull as history
 
 
 class HistoryPullTests(unittest.TestCase):
+    def setUp(self):
+        import data_loading
+
+        tmp = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(
+            patch.object(data_loading, "DATA_PATH", str(Path(tmp) / "cache.pkl"))
+        )
+
+    def test_merge_keeps_newer_rows_and_maintenance_changes_since_start(self):
+        baseline = pd.DataFrame(
+            {
+                "key": ["SDIPR-1", "SDIPR-2", "SDIPR-3"],
+                "updated": [
+                    "2026-09-21T10:00:00Z",
+                    "2026-09-21T08:00:00Z",
+                    "2026-09-21T08:00:00Z",
+                ],
+                "status": ["Done", "Open", "Open"],
+                "Land": ["Deutschland", "Land noch nicht ermittelt", "Deutschland"],
+                "source": ["Telefon", "", "Portal"],
+            }
+        )
+        current = baseline.copy()
+        current.loc[1, ["Land", "source"]] = ["Österreich", "Telefon"]
+        incoming = pd.DataFrame(
+            {
+                "key": ["SDIPR-1", "SDIPR-2", "SDIPR-3", "SDEU-4"],
+                "updated": ["2026-09-21T08:00:00Z"] * 2 + ["2026-09-21T11:00:00Z"] * 2,
+                "status": ["Open", "Open", "Done", "Done"],
+                "Land": ["Land noch nicht ermittelt"] * 4,
+                "source": [""] * 4,
+            }
+        )
+        merged = history.merge_history(current, incoming, baseline).set_index("key")
+        self.assertEqual(merged.loc["SDIPR-1", "status"], "Done")
+        self.assertEqual(merged.loc["SDIPR-1", "source"], "Telefon")
+        self.assertEqual(merged.loc["SDIPR-2", "source"], "Telefon")
+        self.assertEqual(merged.loc["SDIPR-2", "Land"], "Österreich")
+        self.assertEqual(merged.loc["SDIPR-3", "status"], "Done")
+        self.assertIn("SDEU-4", merged.index)
+
     def test_full_window_all_desks_and_partial_failure_keep_history(self):
         calls = []
 
@@ -75,9 +116,9 @@ class HistoryPullTests(unittest.TestCase):
             patch.object(data_loading, "DATA_PATH", str(Path(tmp) / "cache.pkl")),
             patch.object(history, "pull_history", return_value=result),
         ):
+            data_loading.save_data(pd.DataFrame({"key": ["SDIPR-1"], "value": [1]}))
             job.start()
             job.thread.join(3)
-            self.assertFalse(Path(data_loading.DATA_PATH).exists())
             # Another maintenance action saves a row while the pull is running.
             current = pd.DataFrame({"key": ["SDIPR-1", "SDAX-old"], "value": [1, 9]})
             data_loading.save_data(current)
@@ -123,42 +164,134 @@ class HistoryPullTests(unittest.TestCase):
             job.apply()
             self.assertEqual(data_loading.load_data()["key"].tolist(), ["SDIPR-1"])
 
-    def test_concurrent_cache_change_keeps_result_retryable(self):
+    def test_failed_save_keeps_result_retryable(self):
         import data_loading
 
         incoming = pd.DataFrame({"key": ["SDIPR-1"]})
-        concurrent = pd.DataFrame({"key": ["SDAX-1"]})
         job = history.HistoryJob()
-        with (
-            tempfile.TemporaryDirectory() as tmp,
-            patch.object(data_loading, "DATA_PATH", str(Path(tmp) / "cache.pkl")),
-            patch.object(
-                history, "pull_history", return_value=history.RefreshResult(incoming)
-            ),
+        with patch.object(
+            history, "pull_history", return_value=history.RefreshResult(incoming)
         ):
-            data_loading.save_data(incoming)
             job.start()
             job.thread.join(3)
-
-            def load_and_modify():
-                data_loading.save_data(concurrent)
-                return incoming.copy()
-
-            with (
-                patch.object(data_loading, "load_data", side_effect=load_and_modify),
-                self.assertRaisesRegex(RuntimeError, "parallel"),
-            ):
-                job.apply()
-            self.assertEqual(job.snapshot()["state"], "ready")
-            self.assertEqual(data_loading.load_data()["key"].tolist(), ["SDAX-1"])
-            self.assertEqual(list(Path(tmp).glob("*.bak-*")), [])
+        with (
+            patch.object(data_loading, "save_data", side_effect=OSError("disk full")),
+            self.assertRaisesRegex(OSError, "disk full"),
+        ):
             job.apply()
-            self.assertEqual(
-                set(data_loading.load_data()["key"]), {"SDIPR-1", "SDAX-1"}
-            )
+        self.assertEqual(job.snapshot()["state"], "ready")
+        data_loading.save_data(pd.DataFrame({"key": ["SDAX-1"]}))
+        job.apply()
+        self.assertEqual(set(data_loading.load_data()["key"]), {"SDIPR-1", "SDAX-1"})
+
+    def test_competing_write_during_backup_is_blocked_then_rejected_as_stale(self):
+        import data_loading
+
+        data_loading.save_data(pd.DataFrame({"key": ["SDAX-1"]}))
+        old, revision = data_loading.load_data_snapshot()
+        incoming = pd.DataFrame({"key": ["SDIPR-1"]})
+        job = history.HistoryJob()
+        with patch.object(
+            history, "pull_history", return_value=history.RefreshResult(incoming)
+        ):
+            job.start()
+            job.thread.join(3)
+        entered, finished = threading.Event(), threading.Event()
+        errors = []
+
+        def competing_writer():
+            entered.set()
+            try:
+                data_loading.save_data_if_unchanged(old, revision)
+            except data_loading.CacheChangedError as exc:
+                errors.append(exc)
+            finally:
+                finished.set()
+
+        writer = threading.Thread(target=competing_writer)
+        real_copy = data_loading.shutil.copy2
+
+        def pause_backup(source, target):
+            writer.start()
+            self.assertTrue(entered.wait(2))
+            self.assertFalse(finished.wait(0.1))
+            return real_copy(source, target)
+
+        with patch.object(data_loading.shutil, "copy2", side_effect=pause_backup):
+            job.apply()
+        writer.join(3)
+        self.assertTrue(finished.is_set())
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(set(data_loading.load_data()["key"]), {"SDIPR-1", "SDAX-1"})
 
 
 class HistoryUITests(unittest.TestCase):
+    def test_other_session_completion_triggers_one_full_reload(self):
+        from dataclasses import replace
+
+        from streamlit.runtime.fragment import MemoryFragmentStorage
+        from streamlit.testing.v1.local_script_runner import LocalScriptRunner
+        from test_transformation import issue
+
+        import data_loading
+        from data_transformation import load_project_issues
+
+        storage = MemoryFragmentStorage()
+        fragment_ids = []
+        fragment_mode = False
+
+        class FragmentRunner(LocalScriptRunner):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._fragment_storage = storage
+
+            def request_rerun(self, data):
+                if fragment_mode:
+                    data = replace(
+                        data, fragment_id_queue=fragment_ids, is_auto_rerun=True
+                    )
+                return super().request_rerun(data)
+
+            def run(self, *args, **kwargs):
+                result = super().run(*args, **kwargs)
+                fragment_ids[:] = list(storage._fragments)
+                return result
+
+        job = history.HistoryJob()
+        job.status = {"state": "running", "progress": "waiting"}
+        frame = load_project_issues("SDIPR", [issue(key="SDIPR-1")])
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(data_loading, "DATA_PATH", str(Path(tmp) / "cache.pkl")),
+            patch.object(history, "JOB", job),
+            patch("interactive.render_interactive"),
+            patch("streamlit.testing.v1.app_test.LocalScriptRunner", FragmentRunner),
+        ):
+            app = AppTest.from_file("app.py", default_timeout=30).run()
+            job.result = history.RefreshResult(frame, counts={"SDIPR": 1})
+            job.status = {
+                "state": "ready",
+                "counts": {"SDIPR": 1},
+                "errors": {},
+                "asset_failures": {},
+            }
+            job.apply()  # Another session's poll commits the shared result.
+            fragment_mode = True
+            with patch.object(
+                data_loading, "load_data", wraps=data_loading.load_data
+            ) as load:
+                app.run()
+                self.assertFalse(app.exception)
+                self.assertGreater(
+                    load.call_count, 0, "completed import left this session stale"
+                )
+                load.reset_mock()
+                app.run()
+                self.assertFalse(app.exception)
+                self.assertEqual(
+                    load.call_count, 0, "completed import caused a rerun loop"
+                )
+
     def test_finished_import_reloads_cache_and_reports_partial_assets(self):
         from datetime import date
 

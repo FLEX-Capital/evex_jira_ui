@@ -82,10 +82,20 @@ Expand the sidebar date range afterward to include this history in the charts.
 The background thread survives page reruns and browser reconnects. Progress is
 polled every five seconds while the page is open. Return to the dashboard to
 merge a finished download into the latest cache: existing ticket keys are
-updated, new tickets appended, and older/unrelated rows retained. A
+updated, new tickets appended, and older/unrelated rows retained. Rows changed
+in the cache while the import was running are retained in full, as are cached
+rows with newer Jira update timestamps. This preserves intervening ticket,
+Ursprung, category, and country updates; rerun the import later to refresh any
+rows retained because of concurrent changes. A
 `data/jira_data.pkl.bak-history-*` backup is made before saving. Failed desks
 retain their cached data and are reported separately; Assets lookup failures
 remain visible as warnings, including unresolved category labels.
+
+Cache commits use a shared file lock across dashboard sessions and CLI writers.
+Maintenance actions based on a stale cache snapshot stop with a retry message
+instead of overwriting another writer's result. Every open dashboard session
+reloads once when it observes a completed import, including sessions that did
+not start or apply the import.
 
 This temporary worker runs once per server process. A server restart discards
 an unfinished/unapplied download; start it again afterward. It is intended for

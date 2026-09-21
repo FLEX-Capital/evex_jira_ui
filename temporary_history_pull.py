@@ -5,10 +5,9 @@ and transforms data. A UI run merges the finished result into the latest cache,
 so a long-running fetch never saves a stale copy of the existing cache.
 """
 
-import shutil
 import threading
 from datetime import UTC, datetime
-from pathlib import Path
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -18,6 +17,44 @@ from desk_sync import RefreshResult
 from service_desks import DESKS, effective_start
 
 START = datetime(2025, 1, 1, tzinfo=ZoneInfo("Europe/Berlin"))
+
+
+def merge_history(current, incoming, baseline):
+    """Keep rows changed during the pull and rows newer than its Jira snapshot."""
+    from data_transformation import upsert_jira_data
+
+    current = current if current is not None else pd.DataFrame()
+    baseline = baseline if baseline is not None else pd.DataFrame()
+    if current.empty or "key" not in current:
+        return upsert_jira_data(current, incoming)
+    cached = current.drop_duplicates("key", keep="last").set_index("key")
+    fresh = incoming.drop_duplicates("key", keep="last").set_index("key")
+    overlap = cached.index.intersection(fresh.index)
+    protected = pd.Index([])
+    if "updated" in cached and "updated" in fresh:
+        old_times = pd.to_datetime(
+            cached.loc[overlap, "updated"], errors="coerce", utc=True
+        )
+        new_times = pd.to_datetime(
+            fresh.loc[overlap, "updated"], errors="coerce", utc=True
+        )
+        protected = overlap[
+            old_times.notna() & (new_times.isna() | (old_times > new_times))
+        ]
+    if not baseline.empty and "key" in baseline:
+        before = baseline.drop_duplicates("key", keep="last").set_index("key")
+        shared = overlap.intersection(before.index)
+        columns = cached.columns.union(before.columns, sort=False)
+        left = cached.reindex(index=shared, columns=columns).astype(object)
+        right = before.reindex(index=shared, columns=columns).astype(object)
+        unchanged = (left.eq(right) | (left.isna() & right.isna())).all(axis=1)
+        protected = protected.union(shared[~unchanged])
+        protected = protected.union(overlap.difference(before.index))
+    else:
+        # Rows added after an initially empty cache belong to a newer writer.
+        protected = protected.union(overlap)
+    accepted = incoming.loc[~incoming["key"].isin(protected)]
+    return upsert_jira_data(current, accepted)
 
 
 def pull_history(*, fetch=None, transform=None, end=None, progress=None):
@@ -71,17 +108,22 @@ class HistoryJob:
         self.lock = threading.Lock()
         self.thread = None
         self.result = None
+        self.baseline = None
+        self.completion = None
         self.status = {"state": "idle"}
 
     def snapshot(self):
         with self.lock:
-            return dict(self.status)
+            return {**self.status, "completion": self.completion}
 
     def start(self):
+        from data_loading import load_data_snapshot
+
         with self.lock:
             if self.status["state"] in {"running", "ready"}:
                 return False
             self.result = None
+            self.baseline, _ = load_data_snapshot()
             self.status = {"state": "running", "progress": "Import wird gestartet"}
             self.thread = threading.Thread(target=self._run, daemon=True)
             self.thread.start()
@@ -109,39 +151,23 @@ class HistoryJob:
     def apply(self):
         """Apply once, backing up the latest cache and preserving unrelated rows."""
         import data_loading
-        from data_transformation import upsert_jira_data
 
         with self.lock:
             if self.status["state"] != "ready":
                 return False
             if not self.result.frame.empty:
-                path = Path(data_loading.DATA_PATH)
-
-                def signature():
-                    if not path.exists():
-                        return None
-                    stat = path.stat()
-                    return stat.st_ino, stat.st_size, stat.st_mtime_ns
-
-                before = signature()
-                current = data_loading.load_data()
-                if current is None:
-                    current = pd.DataFrame()
-                merged = upsert_jira_data(current, self.result.frame)
-                if "clone_in_project" not in merged:
-                    merged["clone_in_project"] = "-"
-                # Keep a concurrently changed cache intact and retry on next poll.
-                after = signature()
-                if before != after:
-                    raise RuntimeError(
-                        "Cache wurde parallel geändert; erneut versuchen."
+                with data_loading.cache_lock():
+                    current, revision = data_loading.load_data_snapshot()
+                    merged = merge_history(current, self.result.frame, self.baseline)
+                    if "clone_in_project" not in merged:
+                        merged["clone_in_project"] = "-"
+                    data_loading.save_data_if_unchanged(
+                        merged, revision, backup_prefix="history"
                     )
-                if before is not None:
-                    backup = f"{path}.bak-history-{datetime.now(UTC):%Y%m%d-%H%M%S-%f}"
-                    shutil.copy2(path, backup)
-                data_loading.save_data(merged)
-                self.status["rows"] = len(merged)
+                    self.status["rows"] = len(merged)
             self.result = None
+            self.baseline = None
+            self.completion = uuid4().hex
             self.status["state"] = "completed"
             return True
 
@@ -169,11 +195,14 @@ def render_history_pull():
         state = JOB.snapshot()
         if state["state"] == "ready":
             try:
-                if JOB.apply():
-                    st.rerun()
+                JOB.apply()
             except Exception as exc:  # noqa: BLE001 - keep result available to retry
                 st.error(f"Import konnte nicht gespeichert werden: {exc}")
         state = JOB.snapshot()
+        completion = state["completion"]
+        if completion and st.session_state.get("_history_completion") != completion:
+            st.session_state["_history_completion"] = completion
+            st.rerun()
         if st.button(
             "📥 Alle Tickets seit 01.01.2025 laden",
             disabled=state["state"] in {"running", "ready"},
