@@ -40,23 +40,22 @@ Allerheiligen; measured against the stored data it shifts business hours for
 about 2% of tickets and moves 12 across a reporting band.
 The current Erstlösequote view classifies same-calendar-day resolution.
 
-The earliest allowed Euronet creation date is **1 September 2026, 00:00 Berlin**.
-This applies to dashboard refresh, backfill, and resumed checkpoints. The cutoff
-is enforced after Jira search as well as in the query, regardless of the API
-account's timezone. Earlier tickets are excluded even when requesting 365 days.
+Euronet uses the same requested creation-date window as Ipro and Amparex, with
+no desk-specific minimum date. Older Euronet tickets are included in dashboard
+refreshes and backfills when they fall within that window.
 
 ```sh
 # Initial Euronet import; ends at the time the command runs
-uv run --no-sync python backfill_jira.py --project SDEU --start 2026-09-01
+uv run --no-sync python backfill_jira.py --project SDEU --start 2025-01-01
 
-# All three desks; existing desks use 365 days, Euronet is clamped to its cutoff
+# All three desks, past 365 days
 uv run --no-sync python backfill_jira.py
 
 # Any project combination and a shorter period
 uv run --no-sync python backfill_jira.py --project SDAX --project SDEU --days 7
 
 # Reuse a matching checkpoint and fetch the remaining time interval
-uv run --no-sync python backfill_jira.py --project SDEU --start 2026-09-01 --resume
+uv run --no-sync python backfill_jira.py --project SDEU --start 2025-01-01 --resume
 ```
 
 `--start` and `--days` are mutually exclusive. Checkpoints are per project and
@@ -65,6 +64,39 @@ refetched; matching modern checkpoints are filtered, re-enriched if necessary,
 and extended through the current import time. A valid zero-ticket result succeeds
 without changing the cache. Partial project failures return a nonzero exit status
 while successful project results are merged.
+
+If an existing Euronet checkpoint starts at the former September 2026 boundary,
+run the first expanded backfill **without `--resume`**. A checkpoint covering
+only recent tickets cannot establish coverage for an earlier requested start.
+The temporary full-history button below always fetches its entire window.
+
+## Temporary full-history button
+
+In the collapsed **Interaktiv → Daten aktualisieren** section, the Ursprung and
+Länder update buttons sit alongside the temporary import. Use **Alle Tickets seit
+01.01.2025 laden** to download all three desks through the import start time.
+All three desks begin at 1 January 2025, 00:00 Berlin.
+Dashboard company/date filters do not limit the pull.
+Expand the sidebar date range afterward to include this history in the charts.
+
+The background thread survives page reruns and browser reconnects. Progress is
+polled every five seconds while the page is open. Return to the dashboard to
+merge a finished download into the latest cache: existing ticket keys are
+updated, new tickets appended, and older/unrelated rows retained. A
+`data/jira_data.pkl.bak-history-*` backup is made before saving. Failed desks
+retain their cached data and are reported separately; Assets lookup failures
+remain visible as warnings, including unresolved category labels.
+
+This temporary worker runs once per server process. A server restart discards
+an unfinished/unapplied download; start it again afterward. It is intended for
+the existing single-process deployment, not multiple application replicas.
+Use the CLI backfill above if resumable disk checkpoints are required.
+
+Removal: delete `temporary_history_pull.py`,
+`tests/test_temporary_history_pull.py`, this README section, and the
+`render_history_pull` import/calls in `app.py` (including the temporary
+Interaktiv tabs immediately before empty-state `st.stop()` calls). The regular
+refresh, CLI backfill, saved tickets, and analytics do not depend on this module.
 
 ## Normal Assets workspace
 
@@ -77,7 +109,8 @@ in `jira_loader.py`:
 Asset references must match this workspace. Inaccessible or mismatched objects
 produce explicit errors and `Unbekannt` category labels; there is no sandbox
 fallback. Fresh imports resolve category labels directly from normal Assets and
-retain `assets_cloud_id`, `assets_workspace_id`, and `asset_errors` in raw data.
+retain `assets_cloud_id`, `assets_workspace_id`, and `asset_errors` in
+`data/jira_issues.json` (not in the dashboard's Raw Data table).
 The static category map is only a compatibility fallback for unenriched legacy
 inputs, not for any normal-workspace fetch.
 
@@ -89,12 +122,23 @@ uv run --no-sync python asset_migration.py
 
 This resolves the distinct category IDs originally copied from production issue
 fields. It preserves ticket rows, customer/branch IDs, non-Assets fields, and date
-coverage. It writes `category_assets_cloud_id`, `category_assets_workspace_id`,
-and `category_asset_errors`. Customer/branch columns in the legacy dataframe are
+coverage. Customer/branch columns in the legacy dataframe are
 raw reference IDs, so they require no label migration. The command creates a
 `data/jira_data.pkl.bak-assets-*` backup and refuses to overwrite a cache that
-changed during its API reads. Correct Assets permissions and rerun to recover
-labels previously marked unknown.
+changed during its API reads. If any lookup fails, it exits without changing the
+cache or creating a backup. Correct Assets permissions and rerun to recover
+labels previously marked unknown across the entire cache, then reload Streamlit.
+
+If category lookups return HTTP 403 while customer objects work, check the
+category schema permissions for the account configured as `JIRA_USERNAME` in
+the app's environment. In Assets, open the category schema's **Schema
+configuration → Roles**, grant **Object schema users** access to that account
+or its group, and check any object-type role restrictions. See
+[Atlassian's schema role instructions](https://support.atlassian.com/assets/docs/add-users-or-groups-to-an-object-schema-role/).
+Being able to read Jira tickets and their category object IDs does not by itself
+grant permission to read the category objects. After granting access, run the
+category migration above with dashboard refreshes idle; it avoids a full ticket
+download and backs up the cache before saving successfully resolved labels.
 
 ## Country resolution (Länder tab)
 

@@ -69,6 +69,12 @@ def main():
     # Refuse a stale overwrite if another process refreshed during the API reads.
     original = Path(DATA_PATH).stat()
     result, report = migrate_categories(frame, workers=args.workers)
+    if report["failed_objects"]:
+        raise SystemExit(
+            f"Category migration: {report}. Cache unchanged: category lookups "
+            "failed. Check Assets schema/object-type permissions for the account "
+            "configured as JIRA_USERNAME and retry."
+        )
     current = Path(DATA_PATH).stat()
     if (current.st_mtime_ns, current.st_size) != (
         original.st_mtime_ns,
@@ -82,8 +88,6 @@ def main():
     save_data(result)
     print(f"Cache backup: {backup}")
     print(f"Category migration: {report}")
-    if report["failed_objects"]:
-        print("Unresolved normal Assets are marked Unbekannt. No sandbox fallback.")
 
 
 if __name__ == "__main__":

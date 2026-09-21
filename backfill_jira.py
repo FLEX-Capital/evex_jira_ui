@@ -5,7 +5,7 @@ fetch inline in a script run, so any browser interaction or reconnect reruns
 the script and kills the fetch mid-flight. A year of issues takes long enough
 that this is close to guaranteed. Run this from a terminal instead.
 
-    uv run python backfill_jira.py                  # past year, all desks (SDEU: since 2026-09-01)
+    uv run python backfill_jira.py                  # past year, all desks
     uv run python backfill_jira.py --days 60        # shorter window
     uv run python backfill_jira.py --resume         # reuse existing checkpoints
     uv run python backfill_jira.py --project SDIPR  # one project only

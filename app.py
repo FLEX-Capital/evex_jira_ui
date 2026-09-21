@@ -22,6 +22,7 @@ from resolution_bands import BAND_COLORS, BAND_NOT_DONE, BAND_ORDER, BAND_UNDER_
 from service_desks import COMPANY_LABELS, DESKS, filter_companies
 from source_sync import refresh_missing_sources
 from styles import CUSTOM_CSS
+from temporary_history_pull import render_history_pull
 
 # set to dark mode
 st.set_page_config(page_title="Jira Analytics Dashboard", layout="wide")
@@ -136,7 +137,10 @@ if st.sidebar.button("🔄 aktualisieren"):
         failures = result.asset_failures.get(desk.key, 0)
         if failures:
             st.sidebar.warning(
-                f"{desk.label}: Assets-Daten bei {failures} Tickets unvollständig. Details in den Rohdaten."
+                f"{desk.label}: Assets-Daten bei {failures} Tickets unvollständig. "
+                "Kategorien können deshalb als Unbekannt erscheinen. "
+                "Bei HTTP 403: Schema-/Objekttyp-Berechtigungen des in "
+                "JIRA_USERNAME konfigurierten Kontos prüfen."
             )
     if result.counts and not df.empty:
         try:
@@ -147,20 +151,36 @@ if st.sidebar.button("🔄 aktualisieren"):
         except Exception as exc:  # noqa: BLE001 - report optional/isolated failures
             st.sidebar.warning(f"Ursprung-Abgleich fehlgeschlagen: {exc}")
         save_data(df)
-        if not result.errors:
+        if not result.errors and not any(result.asset_failures.values()):
             st.sidebar.success(
                 f"Aktualisierung abgeschlossen: {len(df)} Tickets gespeichert."
             )
-        else:
+        elif result.errors:
             st.sidebar.warning(
                 "Erfolgreiche Abrufe gespeichert; vorhandene Tickets fehlgeschlagener Firmen bleiben erhalten."
+            )
+        else:
+            st.sidebar.warning(
+                f"{len(df)} Tickets gespeichert; Assets-Daten unvollständig. "
+                "Technische Fehlerdetails stehen in data/jira_issues.json "
+                "unter asset_errors."
             )
 
 if not selected_companies:
     st.info("Bitte mindestens eine Firma auswählen.")
+    with (
+        st.tabs(["📄 Interaktiv"])[0],
+        st.expander("Daten aktualisieren", expanded=False),
+    ):
+        render_history_pull()
     st.stop()
 if df is None or df.empty:
     st.info("Keine Jira-Daten vorhanden. Bitte über die Seitenleiste aktualisieren.")
+    with (
+        st.tabs(["📄 Interaktiv"])[0],
+        st.expander("Daten aktualisieren", expanded=False),
+    ):
+        render_history_pull()
     st.stop()
 
 created = pd.to_datetime(df["created"], errors="coerce", utc=True)
@@ -169,6 +189,11 @@ df = filter_companies(df, selected_companies)
 st.sidebar.info(f"{len(df)} Tickets für die gewählten Firmen im Zeitraum.")
 if df.empty:
     st.info("Keine Daten für die gewählten Firmen im Zeitraum.")
+    with (
+        st.tabs(["📄 Interaktiv"])[0],
+        st.expander("Daten aktualisieren", expanded=False),
+    ):
+        render_history_pull()
     st.stop()
 df_raw = df.copy()
 
@@ -734,22 +759,25 @@ with tab_interactive:
                 "(fehlgeschlagene Abfragen)."
             )
 
-    col_sources, col_countries = st.columns(2)
-    with col_sources:
-        refresh_sources = st.button(
-            "🔄 Fehlenden Ursprung aktualisieren",
-            help="Prüft alle gespeicherten Tickets mit leerem Ursprung in Jira, unabhängig vom gewählten Zeitraum und der Firma.",
-        )
-    with col_countries:
-        refresh_countries_clicked = st.button(
-            "🌍 Länder aktualisieren",
-            help=(
-                "Löst alle noch unbekannten Assets über die Assets-API auf und "
-                "schreibt Land für ALLE gespeicherten Tickets neu - unabhängig "
-                "vom gewählten Zeitraum und der Firma. Nötig, wenn der Cache "
-                "einen anderen Datenbestand enthält als die gehosteten Daten."
-            ),
-        )
+    with st.expander("Daten aktualisieren", expanded=False):
+        render_history_pull()
+
+        col_sources, col_countries = st.columns(2)
+        with col_sources:
+            refresh_sources = st.button(
+                "🔄 Fehlenden Ursprung aktualisieren",
+                help="Prüft alle gespeicherten Tickets mit leerem Ursprung in Jira, unabhängig vom gewählten Zeitraum und der Firma.",
+            )
+        with col_countries:
+            refresh_countries_clicked = st.button(
+                "🌍 Länder aktualisieren",
+                help=(
+                    "Löst alle noch unbekannten Assets über die Assets-API auf und "
+                    "schreibt Land für ALLE gespeicherten Tickets neu - unabhängig "
+                    "vom gewählten Zeitraum und der Firma. Nötig, wenn der Cache "
+                    "einen anderen Datenbestand enthält als die gehosteten Daten."
+                ),
+            )
 
     if refresh_sources:
         try:

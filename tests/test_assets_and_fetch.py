@@ -90,12 +90,14 @@ class FetchTests(unittest.TestCase):
             )
         )
 
-    def test_search_uses_account_timezone_and_filters_exact_cutoff(self):
+    def test_search_uses_account_timezone_and_requested_window_for_euronet(self):
         fake = MagicMock()
         fake.myself.return_value = {"timeZone": "America/New_York"}
         fake.project.return_value = object()
         fake.enhanced_search_issues.return_value = {
             "issues": [
+                {"key": "SDEU-0", "fields": {"created": "2024-12-31T23:59:59+00:00"}},
+                {"key": "SDEU-3", "fields": {"created": "2025-01-01T00:00:00+00:00"}},
                 {"key": "SDEU-1", "fields": {"created": "2026-08-31T21:59:59+00:00"}},
                 {"key": "SDEU-2", "fields": {"created": "2026-08-31T22:00:00+00:00"}},
             ]
@@ -110,17 +112,17 @@ class FetchTests(unittest.TestCase):
                 project="SDEU",
                 save_path=None,
             )
-        self.assertEqual([i["key"] for i in issues], ["SDEU-2"])
+        self.assertEqual([i["key"] for i in issues], ["SDEU-3", "SDEU-1", "SDEU-2"])
         self.assertIn(
-            "created >= '2026-08-31 18:00'",
+            "created >= '2024-12-31 19:00'",
             fake.enhanced_search_issues.call_args.kwargs["jql_str"],
         )
 
-    def test_entirely_pre_cutoff_window_does_not_connect(self):
+    def test_reversed_window_does_not_connect(self):
         with patch.object(loader, "JIRA") as connect:
             result = loader.fetch_jira_issues(
-                datetime(2026, 8, 1, tzinfo=UTC),
                 datetime(2026, 8, 2, tzinfo=UTC),
+                datetime(2026, 8, 1, tzinfo=UTC),
                 project="SDEU",
                 save_path=None,
             )
