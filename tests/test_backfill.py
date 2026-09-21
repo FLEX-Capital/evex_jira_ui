@@ -71,7 +71,7 @@ class BackfillTests(unittest.TestCase):
         self.assertEqual(args.project, ["SDEU"])
         self.assertEqual(args.start.isoformat(), "2026-09-01")
 
-    def test_checkpoint_records_effective_cutoff_and_normal_workspace(self):
+    def test_euronet_checkpoint_records_requested_start_and_normal_workspace(self):
         with (
             tempfile.TemporaryDirectory() as tmp,
             patch.object(backfill, "CHECKPOINT_TMPL", tmp + "/{project}.json"),
@@ -84,15 +84,15 @@ class BackfillTests(unittest.TestCase):
                 False,
             )
             self.assertEqual(
-                fetch.call_args.args[0].isoformat(), "2026-08-31T22:00:00+00:00"
+                fetch.call_args.args[0].isoformat(), "2025-01-01T00:00:00+00:00"
             )
             saved = json.loads((Path(tmp) / "SDEU.json").read_text())
             self.assertEqual(
                 saved["assets_workspace_id"], "9926cb30-3f07-4fb2-9c83-aa4fc551c721"
             )
-            self.assertEqual(saved["start"], "2026-08-31T22:00:00+00:00")
+            self.assertEqual(saved["start"], "2025-01-01T00:00:00+00:00")
 
-    def test_legacy_checkpoint_cannot_import_pre_cutoff_or_sandbox_labels(self):
+    def test_legacy_checkpoint_cannot_import_unverified_sandbox_labels(self):
         with (
             tempfile.TemporaryDirectory() as tmp,
             patch.object(backfill, "CHECKPOINT_TMPL", tmp + "/{project}.json"),

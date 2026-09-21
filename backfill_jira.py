@@ -5,7 +5,7 @@ fetch inline in a script run, so any browser interaction or reconnect reruns
 the script and kills the fetch mid-flight. A year of issues takes long enough
 that this is close to guaranteed. Run this from a terminal instead.
 
-    uv run python backfill_jira.py                  # past year, all desks (SDEU: since 2026-09-01)
+    uv run python backfill_jira.py                  # past year, all desks
     uv run python backfill_jira.py --days 60        # shorter window
     uv run python backfill_jira.py --resume         # reuse existing checkpoints
     uv run python backfill_jira.py --project SDIPR  # one project only
@@ -31,7 +31,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from data_loading import DATA_PATH, load_data, save_data
+from data_loading import DATA_PATH, cache_lock, load_data, save_data
 from desk_sync import write_json_atomic
 from jira_loader import (
     CLOUD_ID,
@@ -144,25 +144,26 @@ def merge_into_pickle(frames):
     """Upsert freshly-loaded frames into the existing pickle, with a backup."""
     from data_transformation import upsert_jira_data
 
-    df_old = load_data()
-    if df_old is None:
-        df_old = pd.DataFrame()
+    with cache_lock():
+        df_old = load_data()
+        if df_old is None:
+            df_old = pd.DataFrame()
 
-    df_combined = pd.concat(frames, ignore_index=True)
+        df_combined = pd.concat(frames, ignore_index=True)
 
-    df = upsert_jira_data(df_old, df_combined)
+        df = upsert_jira_data(df_old, df_combined)
 
-    if "clone_in_project" not in df.columns:
-        df["clone_in_project"] = "-"
+        if "clone_in_project" not in df.columns:
+            df["clone_in_project"] = "-"
 
-    if os.path.exists(DATA_PATH):
-        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-        backup = f"{DATA_PATH}.bak-{stamp}"
-        shutil.copy2(DATA_PATH, backup)
-        print(f"backed up existing pickle -> {backup}", flush=True)
+        if os.path.exists(DATA_PATH):
+            stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+            backup = f"{DATA_PATH}.bak-{stamp}"
+            shutil.copy2(DATA_PATH, backup)
+            print(f"backed up existing pickle -> {backup}", flush=True)
 
-    save_data(df)
-    return df_old, df
+        save_data(df)
+        return df_old, df
 
 
 def parse_args(argv=None):
