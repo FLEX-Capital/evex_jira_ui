@@ -25,21 +25,21 @@ class DeskTests(unittest.TestCase):
                         [keys[x] for x in selection],
                     )
 
-    def test_only_euronet_start_is_clamped_to_berlin_midnight(self):
+    def test_all_desks_use_requested_start_without_a_minimum_date(self):
         start = datetime(2025, 9, 1, tzinfo=UTC)
-        self.assertEqual(
-            desks.effective_start("SDEU", start).isoformat(),
-            "2026-08-31T22:00:00+00:00",
-        )
-        self.assertEqual(desks.effective_start("SDAX", start), start)
+        for project in ("SDIPR", "SDAX", "SDEU"):
+            self.assertEqual(desks.effective_start(project, start), start)
+            self.assertIsNone(desks.effective_start(project, None))
         later = datetime(2026, 9, 3, tzinfo=UTC)
         self.assertEqual(desks.effective_start("SDEU", later), later)
 
-    def test_import_filters_wrong_projects_and_pre_cutoff_records(self):
+    def test_import_keeps_older_euronet_tickets_inside_requested_window(self):
         issues = [
+            {"key": "SDEU-0", "fields": {"created": "2024-12-31T23:59:59+00:00"}},
             {"key": "SDEU-1", "fields": {"created": "2026-08-31T21:59:59+00:00"}},
             {"key": "SDEU-2", "fields": {"created": "2026-08-31T22:00:00+00:00"}},
             {"key": "SDAX-3", "fields": {"created": "2026-09-02T00:00:00+00:00"}},
+            {"key": "SDEU-4", "fields": {"created": "2026-09-11T00:00:00+00:00"}},
         ]
         result = desks.filter_issue_window(
             "SDEU",
@@ -47,7 +47,7 @@ class DeskTests(unittest.TestCase):
             datetime(2025, 1, 1, tzinfo=UTC),
             datetime(2026, 9, 10, tzinfo=UTC),
         )
-        self.assertEqual([i["key"] for i in result], ["SDEU-2"])
+        self.assertEqual([i["key"] for i in result], ["SDEU-1", "SDEU-2"])
 
 
 if __name__ == "__main__":

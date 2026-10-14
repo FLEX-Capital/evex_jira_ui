@@ -24,7 +24,6 @@ DESKS = (
         "Euronet",
         "12521",
         "219",
-        datetime(2026, 9, 1, tzinfo=ZoneInfo("Europe/Berlin")),
     ),
 )
 BY_KEY = {desk.key: desk for desk in DESKS}
