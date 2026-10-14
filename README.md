@@ -73,10 +73,13 @@ The temporary full-history button below always fetches its entire window.
 ## Temporary full-history button
 
 In the collapsed **Interaktiv → Daten aktualisieren** section, the Ursprung and
-Länder update buttons sit alongside the temporary import. Use **Alle Tickets seit
-01.01.2025 laden** to download all three desks through the import start time.
-All three desks begin at 1 January 2025, 00:00 Berlin.
-Dashboard company/date filters do not limit the pull.
+Länder update buttons sit alongside **Backfill / Datenimport**. Pick a creation
+date range and one or more service desks, then use **Ausgewählte Tickets laden**.
+The defaults are 1 January 2025 through today, with Ipro, Amparex and Euronet
+all selected. Both selected days are included in full in Berlin time; today
+ends at the import start time. An incomplete date range or empty desk selection
+disables the import button. The selection is frozen while the import runs.
+These import controls are independent of the sidebar company/date filters.
 Expand the sidebar date range afterward to include this history in the charts.
 
 The background thread survives page reruns and browser reconnects. Progress is

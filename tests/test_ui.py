@@ -10,11 +10,17 @@ class CompanyUITests(unittest.TestCase):
     def test_company_selector_defaults_all_and_empty_selection_stops_cleanly(self):
         with patch("data_loading.load_data", return_value=pd.DataFrame()):
             app = AppTest.from_file("app.py", default_timeout=30).run()
-            self.assertEqual(len(app.multiselect), 1)
-            self.assertEqual(app.multiselect[0].value, ["Ipro", "Amparex", "Euronet"])
-            app.multiselect[0].set_value([]).run()
+            self.assertEqual(len(app.sidebar.multiselect), 1)
+            self.assertEqual(
+                app.sidebar.multiselect[0].value, ["Ipro", "Amparex", "Euronet"]
+            )
+            app.sidebar.multiselect[0].set_value([]).run()
             self.assertFalse(app.exception)
             self.assertTrue(any("Firma" in info.value for info in app.info))
+            self.assertEqual(
+                app.multiselect(key="temporary_history_desks").value,
+                ["SDIPR", "SDAX", "SDEU"],
+            )
 
     def test_selected_companies_reach_raw_data_and_empty_optional_charts_render(self):
         from datetime import date
@@ -41,7 +47,7 @@ class CompanyUITests(unittest.TestCase):
             self.assertFalse(app.exception)
             raw_frame = app.dataframe[0].value
             self.assertEqual(set(raw_frame["key"]), {"SDIPR-1", "SDAX-1", "SDEU-1"})
-            app.multiselect[0].set_value(["Euronet", "Ipro"]).run()
+            app.sidebar.multiselect[0].set_value(["Euronet", "Ipro"]).run()
             self.assertFalse(app.exception)
             self.assertEqual(set(app.dataframe[0].value["key"]), {"SDIPR-1", "SDEU-1"})
 
