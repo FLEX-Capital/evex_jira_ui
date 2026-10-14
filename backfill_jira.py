@@ -9,6 +9,11 @@ that this is close to guaranteed. Run this from a terminal instead.
     uv run python backfill_jira.py --days 60        # shorter window
     uv run python backfill_jira.py --resume         # reuse existing checkpoints
     uv run python backfill_jira.py --project SDIPR  # one project only
+    uv run python backfill_jira.py --start 2025-01-01 --end 2025-03-17  # one slice
+
+The last form is how you extend an existing collection backwards without
+refetching what you already have: the merge is an upsert, so a bounded slice is
+added to the pickle and everything already there is kept.
 
 Each project's raw issues are checkpointed to ``data/backfill_<PROJECT>.json``
 as soon as its fetch finishes, so a crash during the second project does not
@@ -43,6 +48,122 @@ from jira_loader import (
 from service_desks import BY_KEY, as_utc, effective_start, filter_issue_window
 
 CHECKPOINT_TMPL = "data/backfill_{project}.json"
+SAVE_EVERY = 100
+
+
+def _partial_paths(project):
+    """Partial-log paths, derived from the checkpoint path rather than declared.
+
+    Partial progress within a single fetch. The completed checkpoint is one JSON
+    document; this is append-only NDJSON, so flushing every SAVE_EVERY issues
+    costs the size of the flush, not of everything fetched so far.
+
+    Deriving these from CHECKPOINT_TMPL is deliberate. As separate constants they
+    kept pointing at the real data/ directory in tests that only patched
+    CHECKPOINT_TMPL, so running the suite created and then deleted the partial
+    log of a backfill running concurrently - destroying the exact thing this
+    mechanism exists to protect. Now redirecting the checkpoint redirects these.
+    """
+    base = CHECKPOINT_TMPL.format(project=project)
+    stem = base.removesuffix(".json")
+    return f"{stem}.partial.ndjson", f"{stem}.partial.json"
+
+
+def begin_partial(project, start_dt, end_dt):
+    """Start a fresh partial log, returning an appender for fetch_jira_issues.
+
+    The metadata is written first and separately: a partial log is only safe to
+    resume from if we know which window produced it, and that has to be on disk
+    before the first issue is, not after.
+    """
+    log_path, meta_path = _partial_paths(project)
+    os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
+    write_json_atomic(
+        meta_path,
+        {
+            "version": 1,
+            "project": project,
+            "start": start_dt.isoformat(),
+            "end": end_dt.isoformat(),
+            "assets_cloud_id": CLOUD_ID,
+            "assets_workspace_id": WORKSPACE_ID,
+        },
+    )
+    open(log_path, "w").close()
+
+    def append(issues):
+        # Append + flush + fsync: a killed process must leave every line it
+        # reported as saved actually on disk, not in a buffer.
+        with open(log_path, "a") as handle:
+            handle.writelines(json.dumps(issue) + "\n" for issue in issues)
+            handle.flush()
+            os.fsync(handle.fileno())
+        print(f"  [{project}] checkpointed +{len(issues)} issues", flush=True)
+
+    return append
+
+
+def _reopen_partial(project):
+    """Appender for a partial log that already exists, leaving its lines intact."""
+    log_path, _ = _partial_paths(project)
+
+    def append(issues):
+        with open(log_path, "a") as handle:
+            handle.writelines(json.dumps(issue) + "\n" for issue in issues)
+            handle.flush()
+            os.fsync(handle.fileno())
+        print(f"  [{project}] checkpointed +{len(issues)} issues", flush=True)
+
+    return append
+
+
+def load_partial(project, start_dt, end_dt):
+    """Return (issues, oldest_created) from a resumable partial log, else ([], None).
+
+    A log whose window does not match the requested one is ignored rather than
+    merged: silently mixing two windows is how a backfill ends up with a gap it
+    cannot detect.
+    """
+    log_path, meta_path = _partial_paths(project)
+    if not (os.path.exists(log_path) and os.path.exists(meta_path)):
+        return [], None
+    with open(meta_path) as handle:
+        meta = json.load(handle)
+    if (
+        meta.get("project") != project
+        or meta.get("assets_cloud_id") != CLOUD_ID
+        or meta.get("assets_workspace_id") != WORKSPACE_ID
+        or as_utc(datetime.fromisoformat(meta["start"])) != start_dt
+    ):
+        return [], None
+
+    issues = []
+    with open(log_path) as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                issues.append(json.loads(line))
+            except json.JSONDecodeError:
+                # Only the final line can be torn, and only if the process died
+                # mid-write. Everything before it is still good.
+                print(f"  [{project}] discarding torn final line", flush=True)
+                break
+
+    issues = dedupe_issues(issues)
+    if not issues:
+        return [], None
+    oldest = min(
+        as_utc(datetime.fromisoformat(issue["fields"]["created"])) for issue in issues
+    )
+    return issues, oldest
+
+
+def clear_partial(project):
+    for path in _partial_paths(project):
+        if os.path.exists(path):
+            os.unlink(path)
 
 
 def _fmt_duration(seconds):
@@ -109,20 +230,58 @@ def fetch_project(project, start_dt, end_dt, resume):
                 ):
                     issues[i] = enrich_issue_assets(issue)
             fetch_start = max(start_dt, saved_end)
+    # Progress from a fetch that was interrupted partway. Because the JQL sorts
+    # created DESC, a partial log covers the NEWEST slice of the window, so what
+    # is left to fetch is everything older than the oldest issue it holds.
+    partial, oldest_partial = ([], None)
+    if resume:
+        partial, oldest_partial = load_partial(project, start_dt, end_dt)
+        if partial:
+            print(
+                f"[{project}] resuming: {len(partial)} issues already saved, "
+                f"oldest {oldest_partial.isoformat()}",
+                flush=True,
+            )
+
     started = time.time()
-    print(
-        f"[{project}] fetching {fetch_start.isoformat()} -> {end_dt.isoformat()}",
-        flush=True,
+    windows = []
+    if oldest_partial is None:
+        windows.append((fetch_start, end_dt))
+    else:
+        # The older remainder. The boundary issue itself is refetched and then
+        # deduped, which is cheaper than trying to express an exclusive bound
+        # through Jira's minute-granularity search.
+        if fetch_start < oldest_partial:
+            windows.append((fetch_start, oldest_partial))
+        # A sliver at the top if the requested end moved on since the log began.
+        if fetch_start > oldest_partial:
+            windows.append((fetch_start, end_dt))
+
+    append = (
+        begin_partial(project, start_dt, end_dt)
+        if not partial
+        else _reopen_partial(project)
     )
-    fresh = fetch_jira_issues(
-        fetch_start,
-        end_dt,
-        max_issues=1_000_000,
-        project=project,
-        save_path=None,
-        progress_cb=_make_progress(project, started),
-    )
-    issues = dedupe_issues(issues + fresh)
+    fresh = []
+    for window_start, window_end in windows:
+        print(
+            f"[{project}] fetching {window_start.isoformat()} -> {window_end.isoformat()}",
+            flush=True,
+        )
+        fresh.extend(
+            fetch_jira_issues(
+                window_start,
+                window_end,
+                max_issues=1_000_000,
+                project=project,
+                save_path=None,
+                progress_cb=_make_progress(project, started),
+                partial_cb=append,
+                partial_every=SAVE_EVERY,
+            )
+        )
+
+    issues = dedupe_issues(issues + partial + fresh)
     issues = filter_issue_window(project, issues, start_dt, end_dt)
     write_json_atomic(
         checkpoint,
@@ -136,6 +295,7 @@ def fetch_project(project, start_dt, end_dt, resume):
             "issues": issues,
         },
     )
+    clear_partial(project)
     print(f"[{project}] {len(issues)} issues checkpointed", flush=True)
     return issues
 
@@ -176,6 +336,15 @@ def parse_args(argv=None):
         help="first creation date, YYYY-MM-DD (Berlin)",
     )
     ap.add_argument(
+        "--end",
+        type=date.fromisoformat,
+        help=(
+            "last creation date, YYYY-MM-DD (Berlin), inclusive; default is now. "
+            "Use with --start to fetch one bounded slice and upsert it, instead "
+            "of refetching a whole window that is already collected."
+        ),
+    )
+    ap.add_argument(
         "--project",
         action="append",
         choices=list(BY_KEY),
@@ -197,7 +366,15 @@ def main(argv=None):
 
     args = parse_args(argv)
     projects = list(dict.fromkeys(args.project or BY_KEY))
-    end_dt = datetime.now(UTC)
+    # dt_time.max makes --end inclusive of the whole Berlin day, matching --start
+    # which begins at that day's midnight.
+    end_dt = (
+        as_utc(
+            datetime.combine(args.end, dt_time.max, tzinfo=ZoneInfo("Europe/Berlin"))
+        )
+        if args.end
+        else datetime.now(UTC)
+    )
     start_dt = (
         datetime.combine(args.start, dt_time.min, tzinfo=ZoneInfo("Europe/Berlin"))
         if args.start
@@ -205,7 +382,11 @@ def main(argv=None):
     )
     start_dt = as_utc(start_dt)
     if start_dt > end_dt:
-        raise SystemExit("Start date is in the future")
+        raise SystemExit(
+            "Start date is after the end date"
+            if args.end
+            else "Start date is in the future"
+        )
     print(
         f"Backfilling {', '.join(projects)} ({start_dt.date()} -> {end_dt.date()})",
         flush=True,

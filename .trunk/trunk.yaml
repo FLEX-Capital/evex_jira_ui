@@ -36,7 +36,7 @@ lint:
     - osv-scanner@2.6.0
     - oxipng@10.2.1
     - prettier@3.9.8
-    - ruff@0.16.8
+    - ruff@0.16.7
     - taplo@0.10.0
     - trufflehog@3.97.5
   ignore:
