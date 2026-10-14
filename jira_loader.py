@@ -123,6 +123,51 @@ def get_asset_attribute(asset, attribute_name):
     return None
 
 
+# The fields anything downstream actually reads: data_transformation._extract_issue
+# (the bulk), enrich_issue_assets (the customfield_106xx asset refs),
+# filter_issue_window (created) and dedupe_issues (updated).
+#
+# A search response carries ~170 fields per issue. Keeping only these cuts an
+# issue from ~15 KB to ~5 KB, which is what lets a full backfill finish without
+# exhausting memory. Trimming happens client-side rather than by narrowing the
+# Jira query, so a mistake here costs a field we already had rather than one we
+# never fetched. tests/test_assets_and_fetch.py pins this set to what the
+# transformation reads, so adding a field there fails loudly here.
+RETAINED_FIELDS = frozenset(
+    {
+        "summary",
+        "description",
+        "status",
+        "created",
+        "updated",
+        "labels",
+        "priority",
+        "issuetype",
+        "issuelinks",
+        "comment",
+        "customfield_10010",
+        "customfield_10065",
+        "customfield_10673",
+        "customfield_10674",
+        "customfield_10675",
+        "customfield_10679",
+        "customfield_10680",
+        "customfield_10689",
+    }
+)
+
+
+def trim_issue(issue):
+    """Drop the ~150 fields per issue that nothing downstream reads."""
+    trimmed = {key: value for key, value in issue.items() if key != "fields"}
+    trimmed["fields"] = {
+        name: value
+        for name, value in (issue.get("fields") or {}).items()
+        if name in RETAINED_FIELDS
+    }
+    return trimmed
+
+
 ASSET_FIELDS = (
     "customfield_10680",
     "customfield_10679",
@@ -157,7 +202,10 @@ def enrich_issue_assets(issue):
                 if label:
                     result["asset_labels"][object_id] = label
                 if field == "customfield_10673":
-                    result["customer"] = asset
+                    # Keep the country, discard the Assets object it came from.
+                    # That object averaged 24 KB per issue - 63% of the whole
+                    # payload - and nothing downstream ever read it, so holding
+                    # it was what pushed a full backfill out of memory.
                     result["customer_country"] = get_asset_attribute(
                         asset, "Land"
                     ) or get_asset_attribute(asset, "Country")
@@ -202,6 +250,8 @@ def fetch_jira_issues(
     project="SDIPR",
     save_path="data/jira_issues.json",
     progress_cb=None,
+    partial_cb=None,
+    partial_every=100,
 ):
     if not re.fullmatch(r"[A-Z][A-Z0-9_]*", project):
         raise ValueError("Invalid Jira project key")
@@ -229,6 +279,10 @@ def fetch_jira_issues(
     next_token = None
     seen_tokens = set()
     fetched = 0
+    # Issues fetched but not yet handed to partial_cb. The callback receives
+    # only the new ones so it can append rather than rewrite - rewriting the
+    # whole set every flush would be quadratic on a multi-hour backfill.
+    unflushed = []
     while True:
         page = jira.enhanced_search_issues(
             jql_str=jql,
@@ -241,12 +295,17 @@ def fetch_jira_issues(
             raise RuntimeError(f"Jira returned an invalid result for {project}")
         batch = page["issues"]
         fetched += len(batch)
-        all_issues.extend(
-            enrich_issue_assets(issue)
+        kept = [
+            enrich_issue_assets(trim_issue(issue))
             for issue in filter_issue_window(project, batch, start_dt, end_dt)
-        )
+        ]
+        all_issues.extend(kept)
+        unflushed.extend(kept)
         if progress_cb:
             progress_cb(len(all_issues))
+        if partial_cb and len(unflushed) >= partial_every:
+            partial_cb(unflushed)
+            unflushed = []
         next_token = page.get("nextPageToken")
         if not next_token:
             break
@@ -257,6 +316,8 @@ def fetch_jira_issues(
         if next_token in seen_tokens:
             raise RuntimeError(f"{project}: repeated pagination token")
         seen_tokens.add(next_token)
+    if partial_cb and unflushed:
+        partial_cb(unflushed)
     all_issues = dedupe_issues(all_issues)
     if save_path:
         from pathlib import Path

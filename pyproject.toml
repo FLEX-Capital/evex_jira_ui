@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "anthropic>=1.6.0",
   "dotenv>=0.9.9",
   "holidays>=0.97",
   "jira>=3.10.5",
@@ -28,10 +29,11 @@ dependencies = [
   # Raise the ceiling only once pygwalker stops importing make_url_path_regex.
   "streamlit>=1.54.0,<1.57",
   "streamlit-aggrid>=1.2.1",
+  "tqdm>=4.70.1",
 ]
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "python-pptx>=1.0.2"]
 
 # The suite is also runnable as `python -m unittest discover -s tests`, which puts
 # both the repo root and tests/ on sys.path. Mirror that for pytest so the two

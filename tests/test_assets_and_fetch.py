@@ -1,4 +1,5 @@
 import importlib
+import json
 import unittest
 from datetime import UTC, datetime
 from secrets import token_hex
@@ -154,3 +155,188 @@ class FetchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IncrementalFlushTests(unittest.TestCase):
+    """A multi-hour fetch must not lose everything when it is interrupted."""
+
+    def setUp(self):
+        self.enterContext(
+            patch.multiple(
+                loader,
+                JIRA_URL="https://jira.example",
+                JIRA_USERNAME="test-user",
+                JIRA_PASSWORD=token_hex(16),
+            )
+        )
+
+    def _fake_jira(self, pages):
+        fake = MagicMock()
+        fake.myself.return_value = {"timeZone": "UTC"}
+        fake.project.return_value = object()
+        fake.enhanced_search_issues.side_effect = pages
+        return fake
+
+    @staticmethod
+    def _page(keys, token):
+        return {
+            "issues": [
+                {"key": f"SDAX-{k}", "fields": {"created": "2026-08-01T00:00:00+00:00"}}
+                for k in keys
+            ],
+            "nextPageToken": token,
+        }
+
+    def test_partial_callback_receives_only_new_issues_each_flush(self):
+        pages = [
+            self._page(range(60), "t1"),
+            self._page(range(60, 120), "t2"),
+            self._page(range(120, 150), None),
+        ]
+        flushes = []
+        with (
+            patch.object(loader, "JIRA", return_value=self._fake_jira(pages)),
+            patch.object(loader, "enrich_issue_assets", side_effect=lambda i: i),
+        ):
+            issues = loader.fetch_jira_issues(
+                datetime(2025, 1, 1, tzinfo=UTC),
+                datetime(2026, 9, 10, tzinfo=UTC),
+                project="SDAX",
+                save_path=None,
+                partial_cb=lambda batch: flushes.append([i["key"] for i in batch]),
+                partial_every=100,
+            )
+        # 120 accumulated triggers the first flush; the tail flushes at the end.
+        self.assertEqual([len(f) for f in flushes], [120, 30])
+        # Crucially disjoint: the callback appends, so overlap would duplicate.
+        flushed = [key for batch in flushes for key in batch]
+        self.assertEqual(len(flushed), len(set(flushed)))
+        self.assertEqual(len(issues), 150)
+
+    def test_tail_is_flushed_even_below_the_threshold(self):
+        flushes = []
+        with (
+            patch.object(
+                loader,
+                "JIRA",
+                return_value=self._fake_jira([self._page(range(3), None)]),
+            ),
+            patch.object(loader, "enrich_issue_assets", side_effect=lambda i: i),
+        ):
+            loader.fetch_jira_issues(
+                datetime(2025, 1, 1, tzinfo=UTC),
+                datetime(2026, 9, 10, tzinfo=UTC),
+                project="SDAX",
+                save_path=None,
+                partial_cb=flushes.append,
+                partial_every=100,
+            )
+        self.assertEqual([len(f) for f in flushes], [3])
+
+    def test_no_callback_keeps_the_previous_behaviour(self):
+        with (
+            patch.object(
+                loader,
+                "JIRA",
+                return_value=self._fake_jira([self._page(range(5), None)]),
+            ),
+            patch.object(loader, "enrich_issue_assets", side_effect=lambda i: i),
+        ):
+            issues = loader.fetch_jira_issues(
+                datetime(2025, 1, 1, tzinfo=UTC),
+                datetime(2026, 9, 10, tzinfo=UTC),
+                project="SDAX",
+                save_path=None,
+            )
+        self.assertEqual(len(issues), 5)
+
+
+class EnrichmentFootprintTests(unittest.TestCase):
+    """The enriched issue is held in memory for every ticket in a backfill."""
+
+    def test_country_is_kept_but_the_asset_object_is_not(self):
+        issue = {
+            "key": "SDAX-1",
+            "fields": {
+                "customfield_10673": [
+                    {"objectId": "7", "workspaceId": loader.WORKSPACE_ID}
+                ]
+            },
+        }
+        asset = {
+            "id": "7",
+            "label": "Acme",
+            # Stands in for the ~24 KB of attributes a real Assets object carries.
+            "attributes": [
+                {
+                    "objectTypeAttribute": {"name": "Land"},
+                    "objectAttributeValues": [{"displayValue": "DE"}],
+                },
+                {
+                    "objectTypeAttribute": {"name": "Ballast"},
+                    "objectAttributeValues": [{"displayValue": "x" * 5000}],
+                },
+            ],
+        }
+        with patch.object(loader, "fetch_asset_object", return_value=asset):
+            enriched = loader.enrich_issue_assets(issue)
+        self.assertEqual(enriched["customer_country"], "DE")
+        self.assertNotIn("customer", enriched)
+        self.assertNotIn("Ballast", json.dumps(enriched))
+
+
+class TrimTests(unittest.TestCase):
+    """Trimming must be invisible to the transformation, only to memory."""
+
+    def _full_issue(self):
+        fields = {name: f"value-{name}" for name in loader.RETAINED_FIELDS}
+        fields.update(
+            {
+                "created": "2026-08-01T00:00:00.000+0000",
+                "updated": "2026-08-02T00:00:00.000+0000",
+                "labels": ["a"],
+                "issuelinks": [],
+                "comment": {"comments": [{"body": "hallo"}]},
+                "status": {"name": "Fertig", "statusCategory": {"name": "Done"}},
+                "issuetype": {"name": "Allgemeine Anfrage"},
+                "priority": {"name": "Medium"},
+                "customfield_10065": [],
+                "customfield_10675": {"value": "Anruf"},
+                "customfield_10010": {},
+            }
+        )
+        # The ~150 fields a real search response also carries.
+        for n in range(150):
+            fields[f"customfield_9{n:03d}"] = {"junk": "x" * 200}
+        fields["creator"] = {"displayName": "x" * 500}
+        return {"key": "SDAX-1", "fields": fields}
+
+    def test_trim_drops_junk_and_keeps_every_retained_field(self):
+        trimmed = loader.trim_issue(self._full_issue())
+        self.assertEqual(set(trimmed["fields"]), set(loader.RETAINED_FIELDS))
+        self.assertNotIn("creator", trimmed["fields"])
+        self.assertEqual(trimmed["key"], "SDAX-1")
+
+    def test_trim_preserves_top_level_enrichment_keys(self):
+        issue = self._full_issue()
+        issue["customer_country"] = "DE"
+        issue["asset_labels"] = {"7": "Acme"}
+        trimmed = loader.trim_issue(issue)
+        self.assertEqual(trimmed["customer_country"], "DE")
+        self.assertEqual(trimmed["asset_labels"], {"7": "Acme"})
+
+    def test_extraction_is_identical_before_and_after_trimming(self):
+        """The invariant that matters: trimming changes size, never output."""
+        import data_transformation as transform
+
+        issue = self._full_issue()
+        self.assertEqual(
+            transform._extract_issue(issue, "\n"),
+            transform._extract_issue(loader.trim_issue(issue), "\n"),
+        )
+
+    def test_dedupe_still_sees_the_updated_timestamp(self):
+        trimmed = loader.trim_issue(self._full_issue())
+        self.assertEqual(
+            loader._issue_updated_ts(trimmed), "2026-08-02T00:00:00.000+0000"
+        )
