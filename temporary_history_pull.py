@@ -6,7 +6,7 @@ so a long-running fetch never saves a stale copy of the existing cache.
 """
 
 import threading
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -14,7 +14,7 @@ import pandas as pd
 import streamlit as st
 
 from desk_sync import RefreshResult
-from service_desks import DESKS, effective_start
+from service_desks import BY_KEY, DESKS, as_utc, effective_start
 
 START = datetime(2025, 1, 1, tzinfo=ZoneInfo("Europe/Berlin"))
 
@@ -57,8 +57,22 @@ def merge_history(current, incoming, baseline):
     return upsert_jira_data(current, accepted)
 
 
-def pull_history(*, fetch=None, transform=None, end=None, progress=None):
-    """Fetch all registered desks using the normal pagination and transformation."""
+def import_selection(start, end, projects):
+    """Freeze and validate a job's dates and desks before starting any work."""
+    start, end = as_utc(start), as_utc(end or datetime.now(UTC))
+    projects = tuple(BY_KEY if projects is None else projects)
+    if not projects or any(project not in BY_KEY for project in projects):
+        raise ValueError("Bitte mindestens einen gültigen Service Desk wählen.")
+    if start > end:
+        raise ValueError("Das Startdatum muss vor oder auf dem Enddatum liegen.")
+    return start, end, tuple(dict.fromkeys(projects))
+
+
+def pull_history(
+    *, start=START, end=None, projects=None, fetch=None, transform=None, progress=None
+):
+    """Fetch selected desks and dates using normal pagination and transformation."""
+    start, end, projects = import_selection(start, end, projects)
     if fetch is None:
         from jira_loader import fetch_jira_issues
 
@@ -67,10 +81,10 @@ def pull_history(*, fetch=None, transform=None, end=None, progress=None):
         from data_transformation import load_project_issues
 
         transform = load_project_issues
-    end = end or datetime.now(UTC)
     result = RefreshResult(pd.DataFrame())
     frames = []
-    for desk in DESKS:
+    for project in projects:
+        desk = BY_KEY[project]
 
         def report(count, label=desk.label):
             if progress:
@@ -79,7 +93,7 @@ def pull_history(*, fetch=None, transform=None, end=None, progress=None):
         try:
             report(0)
             issues = fetch(
-                effective_start(desk.key, START),
+                effective_start(desk.key, start),
                 end,
                 project=desk.key,
                 max_issues=1_000_000,
@@ -116,16 +130,25 @@ class HistoryJob:
         with self.lock:
             return {**self.status, "completion": self.completion}
 
-    def start(self):
+    def start(self, *, start=START, end=None, projects=None):
         from data_loading import load_data_snapshot
 
         with self.lock:
             if self.status["state"] in {"running", "ready"}:
                 return False
+            start, end, projects = import_selection(start, end, projects)
             self.result = None
             self.baseline, _ = load_data_snapshot()
-            self.status = {"state": "running", "progress": "Import wird gestartet"}
-            self.thread = threading.Thread(target=self._run, daemon=True)
+            self.status = {
+                "state": "running",
+                "progress": "Import wird gestartet",
+                "start": start,
+                "end": end,
+                "projects": projects,
+            }
+            self.thread = threading.Thread(
+                target=self._run, args=(start, end, projects), daemon=True
+            )
             self.thread.start()
             return True
 
@@ -133,12 +156,15 @@ class HistoryJob:
         with self.lock:
             self.status["progress"] = message
 
-    def _run(self):
+    def _run(self, start, end, projects):
         try:
-            result = pull_history(progress=self._progress)
+            result = pull_history(
+                start=start, end=end, projects=projects, progress=self._progress
+            )
             with self.lock:
                 self.result = result
                 self.status = {
+                    **self.status,
                     "state": "ready",
                     "counts": dict(result.counts),
                     "errors": dict(result.errors),
@@ -179,12 +205,12 @@ JOB = HistoryJob()
 def render_history_pull():
     """The entire removable UI, including its methodology and progress polling."""
     with st.container():
-        st.subheader("Temporärer Datenimport ab 2025")
+        st.subheader("Backfill / Datenimport")
         st.caption(
-            "Lädt alle Tickets ab 01.01.2025, 00:00 Uhr (Berlin), bis zum "
-            "Start dieses Imports für Ipro, Amparex und Euronet. "
-            "Die Auswahl von Firma und Zeitraum begrenzt "
-            "diesen Import nicht."
+            "Lädt Tickets, die im gewählten Zeitraum erstellt wurden, für die "
+            "gewählten Service Desks. Beide Tage zählen vollständig (Berlin); "
+            "für heute werden Tickets bis zum Importstart geladen. "
+            "Diese Auswahl ist unabhängig von den Filtern in der Seitenleiste."
         )
         st.caption(
             "Vorhandene Tickets werden über ihren Jira-Schlüssel aktualisiert, "
@@ -203,12 +229,44 @@ def render_history_pull():
         if completion and st.session_state.get("_history_completion") != completion:
             st.session_state["_history_completion"] = completion
             st.rerun()
+        busy = state["state"] in {"running", "ready"}
+        now = datetime.now(START.tzinfo)
+        picked = st.date_input(
+            "Backfill-Zeitraum (erstellt)",
+            value=(START.date(), now.date()),
+            min_value=date(1970, 1, 1),
+            max_value=now.date(),
+            format="DD.MM.YYYY",
+            disabled=busy,
+            key="temporary_history_dates",
+        )
+        projects = st.multiselect(
+            "Service Desks",
+            options=list(BY_KEY),
+            default=list(BY_KEY),
+            format_func=lambda project: f"{BY_KEY[project].label} ({project})",
+            disabled=busy,
+            key="temporary_history_desks",
+        )
+        if len(picked) != 2:
+            st.info("Bitte Start- und Enddatum für den Import wählen.")
+        if not projects:
+            st.info("Bitte mindestens einen Service Desk für den Import wählen.")
+        if "projects" in state:
+            labels = ", ".join(BY_KEY[p].label for p in state["projects"])
+            st.caption(
+                f"Letzter/laufender Import: {labels}, "
+                f"{state['start'].astimezone(START.tzinfo):%d.%m.%Y} – "
+                f"{state['end'].astimezone(START.tzinfo):%d.%m.%Y}."
+            )
         if st.button(
-            "📥 Alle Tickets seit 01.01.2025 laden",
-            disabled=state["state"] in {"running", "ready"},
+            "📥 Ausgewählte Tickets laden",
+            disabled=busy or len(picked) != 2 or not projects,
             key="temporary_history_start",
         ):
-            JOB.start()
+            start = datetime.combine(picked[0], time.min, tzinfo=START.tzinfo)
+            end = min(datetime.combine(picked[1], time.max, tzinfo=START.tzinfo), now)
+            JOB.start(start=start, end=end, projects=projects)
             st.rerun()
         if state["state"] == "running":
             st.info(f"Import läuft im Hintergrund. {state.get('progress', '')}")

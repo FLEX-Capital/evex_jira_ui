@@ -1,7 +1,8 @@
 import tempfile
 import threading
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from itertools import combinations
 from pathlib import Path
 from unittest.mock import patch
 
@@ -102,6 +103,60 @@ class HistoryPullTests(unittest.TestCase):
                 job.thread.join(3)
         self.assertEqual(len(runs), 1)
         self.assertEqual(job.snapshot()["state"], "ready")
+
+    def test_selected_window_and_each_desk_subset(self):
+        start = datetime(2026, 3, 28, tzinfo=history.START.tzinfo)
+        end = datetime(2026, 3, 29, 23, 59, 59, 999999, tzinfo=history.START.tzinfo)
+        for size in range(1, 4):
+            for projects in combinations(("SDIPR", "SDAX", "SDEU"), size):
+                with self.subTest(projects=projects):
+                    calls = []
+
+                    def fetch(first, last, _calls=calls, **kwargs):
+                        _calls.append((kwargs["project"], first, last))
+                        return [{"key": kwargs["project"] + "-1"}]
+
+                    result = history.pull_history(
+                        start=start,
+                        end=end,
+                        projects=projects,
+                        fetch=fetch,
+                        transform=lambda project, issues: pd.DataFrame(issues),
+                    )
+                    self.assertEqual([c[0] for c in calls], list(projects))
+                    self.assertTrue(
+                        all(
+                            c[1].isoformat() == "2026-03-27T23:00:00+00:00"
+                            for c in calls
+                        )
+                    )
+                    self.assertTrue(
+                        all(
+                            c[2].astimezone(UTC).isoformat()
+                            == "2026-03-29T21:59:59.999999+00:00"
+                            for c in calls
+                        )
+                    )
+                    self.assertEqual(set(result.counts), set(projects))
+                    self.assertEqual(
+                        set(result.frame["key"]), {p + "-1" for p in projects}
+                    )
+
+    def test_invalid_selection_does_not_start_a_job(self):
+        for selection in (
+            {"projects": []},
+            {"projects": ["UNKNOWN"]},
+            {
+                "start": datetime(2026, 2, 2, tzinfo=UTC),
+                "end": datetime(2026, 2, 1, tzinfo=UTC),
+            },
+        ):
+            with self.subTest(selection=selection):
+                job = history.HistoryJob()
+                with self.assertRaises(ValueError):
+                    job.start(**selection)
+                self.assertEqual(job.snapshot()["state"], "idle")
+                self.assertIsNone(job.thread)
 
     def test_apply_uses_latest_cache_backs_up_and_is_idempotent(self):
         import data_loading
@@ -226,6 +281,49 @@ class HistoryPullTests(unittest.TestCase):
 
 
 class HistoryUITests(unittest.TestCase):
+    def test_controls_validate_and_pass_selection_to_background_fetch(self):
+        job = history.HistoryJob()
+        calls = []
+
+        def fetch(start, end, **kwargs):
+            calls.append((kwargs["project"], start.isoformat(), end.isoformat()))
+            return []
+
+        with (
+            patch.object(history, "JOB", job),
+            patch("jira_loader.fetch_jira_issues", side_effect=fetch),
+            patch("data_loading.load_data", return_value=pd.DataFrame()),
+        ):
+            app = AppTest.from_file("app.py", default_timeout=30).run()
+            picker = app.date_input(key="temporary_history_dates")
+            self.assertEqual(picker.value[0], date(2025, 1, 1))
+            self.assertEqual(
+                set(app.multiselect(key="temporary_history_desks").value),
+                {"SDIPR", "SDAX", "SDEU"},
+            )
+            picker.set_value((date(2026, 3, 28),)).run()
+            self.assertTrue(app.button(key="temporary_history_start").disabled)
+            app.date_input(key="temporary_history_dates").set_value(
+                (date(2026, 3, 28), date(2026, 3, 29))
+            )
+            app.multiselect(key="temporary_history_desks").set_value([]).run()
+            self.assertTrue(app.button(key="temporary_history_start").disabled)
+            app.multiselect(key="temporary_history_desks").set_value(["SDAX"]).run()
+            app.button(key="temporary_history_start").click().run()
+            self.assertFalse(app.exception)
+            self.assertIsNotNone(job.thread)
+            job.thread.join(3)
+            self.assertEqual(
+                calls,
+                [
+                    (
+                        "SDAX",
+                        "2026-03-27T23:00:00+00:00",
+                        "2026-03-29T21:59:59.999999+00:00",
+                    )
+                ],
+            )
+
     def test_other_session_completion_triggers_one_full_reload(self):
         from dataclasses import replace
 
@@ -343,13 +441,11 @@ class HistoryUITests(unittest.TestCase):
         ):
             try:
                 app = AppTest.from_file("app.py", default_timeout=30).run()
-                buttons = [b for b in app.button if "01.01.2025" in b.label]
-                self.assertEqual(len(buttons), 1)
-                buttons[0].click().run()
+                app.button(key="temporary_history_start").click().run()
                 self.assertFalse(app.exception)
-                self.assertTrue(
-                    next(b for b in app.button if "01.01.2025" in b.label).disabled
-                )
+                self.assertTrue(app.button(key="temporary_history_start").disabled)
+                self.assertTrue(app.date_input(key="temporary_history_dates").disabled)
+                self.assertTrue(app.multiselect(key="temporary_history_desks").disabled)
                 self.assertTrue(any("Hintergrund" in i.value for i in app.info))
             finally:
                 release.set()
