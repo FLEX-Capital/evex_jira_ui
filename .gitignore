@@ -15,3 +15,6 @@ __pycache__/*
 # NOTE: .trunk/ is intentionally NOT ignored - .trunk/trunk.yaml and
 # .trunk/configs/ are shared with the team. .trunk/.gitignore already
 # excludes the generated parts (out, logs, tools, plugins, user_*.yaml).
+
+# Generated board deck - rebuild with `uv run --group dev python build_board_deck.py`
+amparex_ai_leverage_board.pptx
