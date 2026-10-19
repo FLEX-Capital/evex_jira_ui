@@ -7,11 +7,23 @@ import plotly.graph_objects as go  # Required for adding the custom text layer
 import streamlit as st
 from st_aggrid import AgGrid, GridOptionsBuilder
 
-from asset_country import NOT_RESOLVED, refresh_countries, save_cache
+from asset_country import (
+    NOT_RESOLVED,
+    attach_country,
+    refresh_countries,
+    save_cache,
+)
+from asset_country import (
+    load_cache as load_country_cache,
+)
 from data_loading import (
     CacheChangedError,
+    cache_lock,
     load_data_snapshot,
     save_data_if_unchanged,
+)
+from data_loading import (
+    cache_revision as current_cache_revision,
 )
 from interactive import render_interactive
 from plotting import (
@@ -782,9 +794,21 @@ with tab_interactive:
                     if "Land" in cached_df.columns
                     else pd.Series(index=cached_df.index, dtype="object")
                 )
-                cached_df, cache, stats = refresh_countries(cached_df)
-                save_cache(cache)
-                save_data_if_unchanged(cached_df, revision)
+                country_baseline = load_country_cache()
+                cached_df, cache, stats = refresh_countries(
+                    cached_df, cache=country_baseline
+                )
+                # Asset countries do not depend on the ticket cache, and save_cache
+                # merges into the latest mapping, so keep them even if the ticket
+                # cache changed meanwhile; a retry then needs no new lookups.
+                cache = save_cache(cache, baseline=country_baseline)
+                with cache_lock():
+                    if current_cache_revision() != revision:
+                        raise CacheChangedError(
+                            "Cache wurde parallel geändert; bitte die Aktualisierung wiederholen."
+                        )
+                    cached_df = attach_country(cached_df, cache)
+                    save_data_if_unchanged(cached_df, revision)
             stats["rows"] = int((cached_df["Land"] != before).sum())
             stats["pending"] = int((cached_df["Land"] == NOT_RESOLVED).sum())
             st.session_state["country_sync_success"] = stats

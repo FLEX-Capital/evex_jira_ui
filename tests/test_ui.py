@@ -82,7 +82,7 @@ class CountryRefreshUITests(unittest.TestCase):
             patch("data_loading.load_data", return_value=frame),
             patch("data_loading.save_data", side_effect=lambda d: saved.update(df=d)),
             patch("asset_country.load_cache", return_value={}),
-            patch("asset_country.save_cache"),
+            patch("asset_country.save_cache", side_effect=lambda cache, **kw: cache),
             patch(
                 "jira_country_export.resolve_asset_country_strict",
                 lambda object_id: "Österreich",
@@ -116,7 +116,7 @@ class CountryRefreshUITests(unittest.TestCase):
             patch("data_loading.load_data", return_value=frame),
             patch("data_loading.save_data"),
             patch("asset_country.load_cache", return_value=cache),
-            patch("asset_country.save_cache"),
+            patch("asset_country.save_cache", side_effect=lambda cache, **kw: cache),
             patch("jira_country_export.resolve_asset_country_strict", boom),
             patch("interactive.render_interactive"),
         ):
@@ -197,6 +197,50 @@ class AuthenticationUITests(unittest.TestCase):
                 self.assertEqual(len(app.sidebar.text_input), 1)
                 app.sidebar.text_input[0].set_value("from-dotenv").run()
                 self.assertEqual(len(app.sidebar.multiselect), 1)
+
+
+class StaleCountryRefreshUITests(unittest.TestCase):
+    def setUp(self):
+        without_ui_password(self)
+
+    _frame = CountryRefreshUITests._frame
+
+    def test_stale_ticket_snapshot_keeps_country_mappings_but_not_tickets(self):
+        frame = self._frame()
+        resolved = {"asset-1": "Deutschland"}
+        with (
+            patch("data_loading.load_data", return_value=frame),
+            patch("asset_country.load_cache", return_value={}),
+            patch("asset_country.save_cache") as save,
+            patch("data_loading.save_data") as save_tickets,
+            patch("interactive.render_interactive"),
+        ):
+            app = AppTest.from_file("app.py", default_timeout=30).run()
+            app.sidebar.date_input[0].set_value(
+                (date(2026, 9, 1), date(2026, 9, 10))
+            ).run()
+            observed = {"revision": "before"}
+
+            def concurrent_country_refresh(*args, **kwargs):
+                observed["revision"] = "after"
+                return frame, resolved, {}
+
+            with (
+                patch(
+                    "data_loading.cache_revision",
+                    side_effect=lambda *a, **k: observed["revision"],
+                ),
+                patch(
+                    "asset_country.refresh_countries",
+                    side_effect=concurrent_country_refresh,
+                ),
+            ):
+                next(b for b in app.button if "Länder" in b.label).click().run()
+            self.assertFalse(app.exception)
+            self.assertTrue(any("parallel" in e.value for e in app.error))
+            # Resolved lookups are kept so a retry needs no new Assets calls.
+            save.assert_called_once_with(resolved, baseline={})
+            save_tickets.assert_not_called()
 
 
 if __name__ == "__main__":

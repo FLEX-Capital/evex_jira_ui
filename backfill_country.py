@@ -24,6 +24,7 @@ from asset_country import (
     NO_ASSETS_LINKED,
     NO_COUNTRY_ON_ASSET,
     NOT_RESOLVED,
+    attach_country,
     load_cache,
     refresh_countries,
     save_cache,
@@ -135,10 +136,14 @@ def main():
             "asset is one of these cannot be told apart from tickets with no asset."
         )
 
-    print(f"Cache holds {len(load_cache(args.cache))} assets")
+    country_baseline = load_cache(args.cache)
+    print(f"Cache holds {len(country_baseline)} assets")
 
     df, cache, stats = refresh_countries(
-        df, cache_path=args.cache, retry_unknown=args.retry_unknown
+        df,
+        cache_path=args.cache,
+        retry_unknown=args.retry_unknown,
+        cache=country_baseline,
     )
     if stats["dropped"]:
         print(f"  dropped {stats['dropped']} null entries; they were re-resolved")
@@ -180,7 +185,8 @@ def main():
     with cache_lock(output):
         if cache_revision(output) != revision:
             raise CacheChangedError("Cache changed during country backfill; rerun.")
-        save_cache(cache, args.cache)
+        cache = save_cache(cache, args.cache, baseline=country_baseline)
+        df = attach_country(df, cache)
         # Same path test as write_pickle_atomically(), which routes the live cache
         # through save_data(). Comparing raw strings here instead would let
         # `--output ./data/jira_data.pkl` overwrite the cache with no backup.

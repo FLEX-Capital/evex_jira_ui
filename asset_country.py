@@ -55,8 +55,34 @@ def load_cache(path=CACHE_PATH):
         return json.load(handle)
 
 
-def save_cache(cache, path=CACHE_PATH):
-    """Write the cache atomically, so an interrupted run cannot truncate it."""
+def save_cache(cache, path=CACHE_PATH, *, baseline=None):
+    """Merge a job's changes under a shared lock, then atomically replace.
+
+    A baseline lets retries remove old nulls without erasing another job's
+    successful resolution. Unchanged baseline entries are never written back.
+    """
+    from data_loading import cache_lock
+
+    with cache_lock(path):
+        current = load_cache(path)
+        if baseline is None:
+            current.update(cache)
+        else:
+            missing = object()
+            for key in baseline.keys() | cache.keys():
+                before = baseline.get(key, missing)
+                after = cache.get(key, missing)
+                if before == after or current.get(key, missing) != before:
+                    continue
+                if after is missing:
+                    current.pop(key, None)
+                else:
+                    current[key] = after
+        _write_cache(current, path)
+        return current
+
+
+def _write_cache(cache, path):
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=directory, suffix=".tmp")
@@ -153,7 +179,13 @@ def collect_object_ids(df):
 
 
 def refresh_countries(
-    df, cache_path=CACHE_PATH, retry_unknown=False, resolver=None, workers=4
+    df,
+    cache_path=CACHE_PATH,
+    retry_unknown=False,
+    resolver=None,
+    workers=4,
+    *,
+    cache=None,
 ):
     """Resolve unknown asset ids, then rewrite Land/land_quelle on every row.
 
@@ -162,12 +194,15 @@ def refresh_countries(
     it. Both the CLI and the dashboard's Länder button go through here, so the
     two cannot drift apart.
 
+    Supply cache to resolve against a captured baseline; that dictionary is
+    copied so it can later be passed unchanged to save_cache(baseline=...).
+
     retry_unknown drops entries cached as None first. Those are ambiguous in
     caches written before the strict resolver landed: a failed lookup and an
     asset that genuinely carries no Land were stored identically, and
     resolve_missing() skips any id already present.
     """
-    cache = load_cache(cache_path)
+    cache = load_cache(cache_path) if cache is None else cache.copy()
     dropped = 0
     if retry_unknown:
         stale = [key for key, value in cache.items() if value is None]
