@@ -1,5 +1,3 @@
-import hmac
-import os
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -27,40 +25,12 @@ from service_desks import COMPANY_LABELS, DESKS, filter_companies
 from source_sync import refresh_missing_sources
 from styles import CUSTOM_CSS
 from temporary_history_pull import render_history_pull
+from ui_auth import require_password
 
 # set to dark mode
 st.set_page_config(page_title="Jira Analytics Dashboard", layout="wide")
 # Apply custom CSS styles
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
-
-
-def require_password() -> None:
-    """
-    Simple password gate for the Streamlit UI.
-
-    - Set `UI_PASSWORD` (recommended via Render env var) to enable.
-    - If `UI_PASSWORD` is not set, the UI will be accessible without a password.
-    """
-    configured_password = os.getenv("UI_PASSWORD")
-    if not configured_password:
-        return
-
-    if st.session_state.get("_ui_authed", False):
-        if st.sidebar.button("🔒 Logout"):
-            st.session_state["_ui_authed"] = False
-            st.rerun()
-        return
-
-    st.sidebar.markdown("### 🔐 Login")
-    entered = st.sidebar.text_input("Passwort", type="password")
-    if entered:
-        if hmac.compare_digest(entered, configured_password):
-            st.session_state["_ui_authed"] = True
-            st.rerun()
-        else:
-            st.sidebar.error("Falsches Passwort.")
-
-    st.stop()
 
 
 # Sidebar
@@ -69,7 +39,7 @@ st.sidebar.image("data/evex_logo.png", width=200)
 st.sidebar.header("\n\nJIRA Data Analysis")
 
 # Require password before showing any data/controls (set UI_PASSWORD to enable).
-# require_password()
+require_password()
 
 st.sidebar.subheader("Data Controls")
 selected_companies = st.sidebar.multiselect(

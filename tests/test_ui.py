@@ -4,9 +4,13 @@ from unittest.mock import patch
 
 import pandas as pd
 from streamlit.testing.v1 import AppTest
+from ui_env import without_ui_password
 
 
 class CompanyUITests(unittest.TestCase):
+    def setUp(self):
+        without_ui_password(self)
+
     def test_company_selector_defaults_all_and_empty_selection_stops_cleanly(self):
         with patch("data_loading.load_data", return_value=pd.DataFrame()):
             app = AppTest.from_file("app.py", default_timeout=30).run()
@@ -53,6 +57,9 @@ class CompanyUITests(unittest.TestCase):
 
 
 class CountryRefreshUITests(unittest.TestCase):
+    def setUp(self):
+        without_ui_password(self)
+
     """The Länder button rewrites the whole cache, not the filtered view."""
 
     def _frame(self):
@@ -126,6 +133,70 @@ class CountryRefreshUITests(unittest.TestCase):
             self.assertIn("fehlgeschlagen", warnings)
 
         self.assertEqual(cache, {}, "a failed lookup must not be cached")
+
+
+class AuthenticationUITests(unittest.TestCase):
+    def setUp(self):
+        without_ui_password(self)
+
+    def test_unicode_passwords_can_be_rejected_and_accepted_without_crashing(self):
+        import os
+
+        for password in ("ascii-password", "pässwört"):
+            with (
+                self.subTest(password=password),
+                patch.dict(os.environ, {"UI_PASSWORD": password}),
+                patch("data_loading.load_data", return_value=pd.DataFrame()),
+            ):
+                app = AppTest.from_file("app.py", default_timeout=30).run()
+                app.sidebar.text_input[0].set_value("wrong-ä").run()
+                self.assertFalse(app.exception)
+                self.assertTrue(app.sidebar.error)
+                app.sidebar.text_input[0].set_value(password).run()
+                self.assertFalse(app.exception)
+                self.assertEqual(len(app.sidebar.multiselect), 1)
+
+    def test_password_blocks_data_and_controls_until_login_and_after_logout(self):
+        import os
+
+        with (
+            patch.dict(os.environ, {"UI_PASSWORD": "test-password"}),
+            patch("data_loading.load_data", return_value=pd.DataFrame()) as load,
+        ):
+            app = AppTest.from_file("app.py", default_timeout=30).run()
+            self.assertFalse(app.exception)
+            load.assert_not_called()
+            self.assertEqual(len(app.sidebar.text_input), 1)
+            self.assertFalse(app.sidebar.multiselect)
+            app.sidebar.text_input[0].set_value("wrong").run()
+            load.assert_not_called()
+            app.sidebar.text_input[0].set_value("test-password").run()
+            self.assertFalse(app.exception)
+            self.assertEqual(len(app.sidebar.multiselect), 1)
+            self.assertTrue(load.called)
+            load.reset_mock()
+            next(b for b in app.sidebar.button if "Logout" in b.label).click().run()
+            load.assert_not_called()
+            self.assertEqual(len(app.sidebar.text_input), 1)
+
+    def test_password_only_in_env_file_gates_a_fresh_process(self):
+        import tempfile
+        from pathlib import Path
+
+        # Nothing has loaded .env into the environment when the gate first runs.
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / ".env"
+            env_file.write_text("UI_PASSWORD=from-dotenv\n")
+            with (
+                patch("ui_auth.ENV_FILE", env_file),
+                patch("data_loading.load_data", return_value=pd.DataFrame()) as load,
+            ):
+                app = AppTest.from_file("app.py", default_timeout=30).run()
+                self.assertFalse(app.exception)
+                load.assert_not_called()
+                self.assertEqual(len(app.sidebar.text_input), 1)
+                app.sidebar.text_input[0].set_value("from-dotenv").run()
+                self.assertEqual(len(app.sidebar.multiselect), 1)
 
 
 if __name__ == "__main__":

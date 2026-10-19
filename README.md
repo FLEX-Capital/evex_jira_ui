@@ -28,6 +28,11 @@ Provide `JIRA_URL=https://amparex.atlassian.net`, `JIRA_USERNAME`, and
 `.env` file. Cached analysis does not require a live Jira connection. The existing
 code loads `.env` with override enabled. Never commit credentials or ticket caches.
 
+Set `UI_PASSWORD` in `.env` or the server environment to require a login before
+any ticket data or import controls are shown; the `.env` value wins, like the Jira
+credentials. Without it, the dashboard remains accessible
+without a password.
+
 ## Euronet import
 
 Euronet uses the existing Amparex custom-field IDs and `Fertig` completion logic.

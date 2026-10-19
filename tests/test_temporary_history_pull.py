@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pandas as pd
 from streamlit.testing.v1 import AppTest
+from ui_env import without_ui_password
 
 import temporary_history_pull as history
 
@@ -281,6 +282,9 @@ class HistoryPullTests(unittest.TestCase):
 
 
 class HistoryUITests(unittest.TestCase):
+    def setUp(self):
+        without_ui_password(self)
+
     def test_controls_validate_and_pass_selection_to_background_fetch(self):
         job = history.HistoryJob()
         calls = []
