@@ -1,9 +1,10 @@
 [project]
 name = "streamlit-ui"
 version = "0.1.0"
-description = "Add your description here"
+description = "Streamlit analytics dashboard for EVEX Jira service desks"
 readme = "README.md"
 requires-python = ">=3.12"
+authors = [{ name = "Flex Capital", email = "engineering@flex.capital" }]
 dependencies = [
   "anthropic>=1.6.0",
   "dotenv>=0.9.9",
@@ -33,10 +34,42 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8.0", "python-pptx>=1.0.2"]
+dev = ["pytest>=8.0", "pytest-cov>=5", "python-pptx>=1.0.2"]
 
 # The suite is also runnable as `python -m unittest discover -s tests`, which puts
 # both the repo root and tests/ on sys.path. Mirror that for pytest so the two
 # runners agree and tests/ needs no __init__.py.
 [tool.pytest.ini_options]
 pythonpath = [".", "tests"]
+addopts = "--cov --cov-report=term-missing -q"
+testpaths = ["tests"]
+
+
+[tool.coverage.run]
+source = ["."]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# E/W: pycodestyle  F: pyflakes  I: isort  N: pep8-naming  UP: pyupgrade  D: pydocstyle
+select = ["E", "W", "F", "I", "N", "UP", "D"]
+# N812/N817: noisy for common aliases (pd/np)
+# D105/D107: magic methods and __init__ don't need docstrings
+# D203/D213: incompatible with Google style (use D211/D212 instead)
+ignore = ["N812", "N817", "D100", "D104", "D105", "D107", "D203", "D213"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.pep8-naming]
+# Allow common single-letter loop vars and domain abbreviations
+ignore-names = ["i", "j", "k", "e", "ex", "df"]
+
+[tool.mypy]
+python_version = "3.12"
+disallow_untyped_defs = true
+ignore_missing_imports = true

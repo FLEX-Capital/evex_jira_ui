@@ -165,3 +165,49 @@ def test_cache_roundtrip(tmp_path):
 
 def test_load_cache_missing_file(tmp_path):
     assert load_cache(str(tmp_path / "absent.json")) == {}
+
+
+def test_stale_country_writers_preserve_each_others_additions(tmp_path):
+    path = str(tmp_path / "cache.json")
+    first, second = load_cache(path), load_cache(path)
+    first["1"] = "Deutschland"
+    second["2"] = "Österreich"
+    save_cache(first, path)
+    save_cache(second, path)
+    assert load_cache(path) == {"1": "Deutschland", "2": "Österreich"}
+
+
+def test_country_commit_preserves_concurrent_change_and_removes_only_unchanged_nulls(
+    tmp_path,
+):
+    path = str(tmp_path / "cache.json")
+    save_cache({"1": None, "2": None, "3": None}, path)
+    baseline = load_cache(path)
+    # A second job resolves an id that the first job only saw as null.
+    save_cache({"1": "Deutschland"}, path)
+    merged = save_cache({"3": None, "4": "Österreich"}, path, baseline=baseline)
+    assert merged == {"1": "Deutschland", "3": None, "4": "Österreich"}
+    assert load_cache(path) == merged
+
+
+def test_country_commits_from_separate_processes_preserve_all_additions(tmp_path):
+    import subprocess
+    import sys
+
+    path = str(tmp_path / "cache.json")
+    script = (
+        "import sys; from asset_country import save_cache; "
+        "save_cache({sys.argv[2]: sys.argv[2]}, sys.argv[1], baseline={})"
+    )
+    processes = [
+        subprocess.Popen([sys.executable, "-c", script, path, str(i)]) for i in range(4)
+    ]
+    try:
+        for process in processes:
+            assert process.wait(timeout=30) == 0
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+    assert load_cache(path) == {str(i): str(i) for i in range(4)}

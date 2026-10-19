@@ -1,6 +1,6 @@
 import itertools
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pandas as pd
 
@@ -48,6 +48,24 @@ class DeskTests(unittest.TestCase):
             datetime(2026, 9, 10, tzinfo=UTC),
         )
         self.assertEqual([i["key"] for i in result], ["SDEU-1", "SDEU-2"])
+
+    def test_berlin_day_window_spans_whole_days_across_dst(self):
+        # 2026-03-29 has 23 hours in Berlin.
+        start = desks.berlin_day_start(date(2026, 3, 29))
+        end = desks.berlin_day_end(date(2026, 3, 29))
+        self.assertEqual(desks.as_utc(start).isoformat(), "2026-03-28T23:00:00+00:00")
+        self.assertEqual(
+            desks.as_utc(end).isoformat(), "2026-03-29T21:59:59.999999+00:00"
+        )
+
+    def test_selected_projects_dedupes_and_rejects_unknown_or_empty(self):
+        self.assertEqual(desks.selected_projects(None), ("SDIPR", "SDAX", "SDEU"))
+        self.assertEqual(
+            desks.selected_projects(["SDEU", "SDAX", "SDEU"]), ("SDEU", "SDAX")
+        )
+        for invalid in ([], ["UNKNOWN"]):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                desks.selected_projects(invalid)
 
 
 if __name__ == "__main__":

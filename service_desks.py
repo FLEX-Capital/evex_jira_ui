@@ -1,8 +1,13 @@
 """Desk identity and import boundaries, independent of Jira credentials."""
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from zoneinfo import ZoneInfo
+
+BERLIN = ZoneInfo("Europe/Berlin")
+# Earliest day the date pickers offer. Without an explicit minimum, Streamlit only
+# reaches ten years before a picker's default, hiding older imported tickets.
+EARLIEST_DAY = date(1970, 1, 1)
 
 
 @dataclass(frozen=True)
@@ -28,6 +33,23 @@ DESKS = (
 )
 BY_KEY = {desk.key: desk for desk in DESKS}
 COMPANY_LABELS = [desk.label for desk in DESKS]
+
+
+def selected_projects(projects=None):
+    """Known desks in the given order without duplicates; all desks when None."""
+    projects = tuple(dict.fromkeys(BY_KEY if projects is None else projects))
+    if not projects or any(project not in BY_KEY for project in projects):
+        raise ValueError("Bitte mindestens einen gültigen Service Desk wählen.")
+    return projects
+
+
+def berlin_day_start(day):
+    return datetime.combine(day, time.min, tzinfo=BERLIN)
+
+
+def berlin_day_end(day):
+    """Last instant of a Berlin calendar day, so a picked end day counts fully."""
+    return datetime.combine(day, time.max, tzinfo=BERLIN)
 
 
 def as_utc(value):

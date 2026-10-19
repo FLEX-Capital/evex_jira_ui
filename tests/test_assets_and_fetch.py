@@ -105,7 +105,9 @@ class FetchTests(unittest.TestCase):
         }
         with (
             patch.object(loader, "JIRA", return_value=fake),
-            patch.object(loader, "enrich_issue_assets", side_effect=lambda i: i),
+            patch.object(
+                loader, "enrich_issue_assets", side_effect=lambda i, **kwargs: i
+            ),
         ):
             issues = loader.fetch_jira_issues(
                 datetime(2025, 1, 1, tzinfo=UTC),
@@ -141,7 +143,9 @@ class FetchTests(unittest.TestCase):
         }
         with (
             patch.object(loader, "JIRA", return_value=fake),
-            patch.object(loader, "enrich_issue_assets", side_effect=lambda i: i),
+            patch.object(
+                loader, "enrich_issue_assets", side_effect=lambda i, **kwargs: i
+            ),
             self.assertRaisesRegex(RuntimeError, "limit"),
         ):
             loader.fetch_jira_issues(
@@ -196,7 +200,9 @@ class IncrementalFlushTests(unittest.TestCase):
         flushes = []
         with (
             patch.object(loader, "JIRA", return_value=self._fake_jira(pages)),
-            patch.object(loader, "enrich_issue_assets", side_effect=lambda i: i),
+            patch.object(
+                loader, "enrich_issue_assets", side_effect=lambda i, **kwargs: i
+            ),
         ):
             issues = loader.fetch_jira_issues(
                 datetime(2025, 1, 1, tzinfo=UTC),
@@ -221,7 +227,9 @@ class IncrementalFlushTests(unittest.TestCase):
                 "JIRA",
                 return_value=self._fake_jira([self._page(range(3), None)]),
             ),
-            patch.object(loader, "enrich_issue_assets", side_effect=lambda i: i),
+            patch.object(
+                loader, "enrich_issue_assets", side_effect=lambda i, **kwargs: i
+            ),
         ):
             loader.fetch_jira_issues(
                 datetime(2025, 1, 1, tzinfo=UTC),
@@ -240,7 +248,9 @@ class IncrementalFlushTests(unittest.TestCase):
                 "JIRA",
                 return_value=self._fake_jira([self._page(range(5), None)]),
             ),
-            patch.object(loader, "enrich_issue_assets", side_effect=lambda i: i),
+            patch.object(
+                loader, "enrich_issue_assets", side_effect=lambda i, **kwargs: i
+            ),
         ):
             issues = loader.fetch_jira_issues(
                 datetime(2025, 1, 1, tzinfo=UTC),

@@ -10,11 +10,38 @@ __pycache__/*
 **/__pycache__/
 **/.DS_Store
 .playwright-mcp/*
-# local tooling config
-.claude/
+# Claude Code local overrides; shared settings and standards are committed.
+.claude/settings.local.json
 # NOTE: .trunk/ is intentionally NOT ignored - .trunk/trunk.yaml and
 # .trunk/configs/ are shared with the team. .trunk/.gitignore already
 # excludes the generated parts (out, logs, tools, plugins, user_*.yaml).
 
 # Generated board deck - rebuild with `uv run --group dev python build_board_deck.py`
 amparex_ai_leverage_board.pptx
+
+# Superpowers Docs, these are Coding Rooms generated docs, and are not committed to the repo.
+docs/superpowers/*
+
+# FLEX repository template: Python, coverage, and editor artifacts.
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+.pytest_cache/
+.coverage*
+coverage.xml
+htmlcov/
+.trunk/*
+!.trunk/trunk.yaml
+!.trunk/configs/
+!.trunk/.gitignore
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+.DS_Store
