@@ -17,6 +17,27 @@ class CacheChangedError(RuntimeError):
     """A writer's input snapshot is no longer the current cache."""
 
 
+class ImportBusyError(RuntimeError):
+    """Another UI or CLI process already owns the import operation."""
+
+
+@contextmanager
+def import_operation_lock(data_path=None):
+    path = Path(data_path or DATA_PATH).resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with Path(f"{path}.import.lock").open("a+b") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ImportBusyError(
+                "Ein Datenimport läuft bereits. Bitte später erneut versuchen."
+            ) from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 @contextmanager
 def cache_lock(path=None):
     """Serialize read/merge/write transactions across threads and CLI processes.
@@ -49,26 +70,32 @@ def cache_revision(path=None):
     return stat.st_ino, stat.st_size, stat.st_mtime_ns
 
 
-def load_data_snapshot():
+def load_data_snapshot(path=None):
     """Read a coherent frame and revision for a later conditional save."""
-    with cache_lock():
-        return load_data(), cache_revision()
+    with cache_lock(path):
+        return (
+            load_data(path=path) if path is not None else load_data()
+        ), cache_revision(path)
 
 
-def save_data_if_unchanged(df, revision, *, backup_prefix=None):
+def save_data_if_unchanged(df, revision, *, backup_prefix=None, path=None):
     """Commit a snapshot only if no writer has replaced its input meanwhile."""
-    with cache_lock():
-        if cache_revision() != revision:
+    target = Path(path or DATA_PATH)
+    with cache_lock(target):
+        if cache_revision(target) != revision:
             raise CacheChangedError(
                 "Cache wurde parallel geändert; bitte die Aktualisierung wiederholen."
             )
         backup = None
-        if backup_prefix and Path(DATA_PATH).exists():
+        if backup_prefix and target.exists():
             backup = (
-                f"{DATA_PATH}.bak-{backup_prefix}-{datetime.now(UTC):%Y%m%d-%H%M%S-%f}"
+                f"{target}.bak-{backup_prefix}-{datetime.now(UTC):%Y%m%d-%H%M%S-%f}"
             )
-            shutil.copy2(DATA_PATH, backup)
-        save_data(df)
+            shutil.copy2(target, backup)
+        if path is None:
+            save_data(df)
+        else:
+            save_data(df, path=target)
         return backup
 
 
@@ -93,14 +120,14 @@ def drop_obsolete_columns(df):
     return df.drop(columns=present) if present else df
 
 
-def save_data(df):
-    with cache_lock():
-        _save_data_unlocked(df)
+def save_data(df, *, path=None):
+    with cache_lock(path):
+        _save_data_unlocked(df, path=path)
 
 
-def _save_data_unlocked(df):
+def _save_data_unlocked(df, *, path=None):
     df = drop_obsolete_columns(df)
-    path = Path(DATA_PATH)
+    path = Path(path or DATA_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
@@ -113,9 +140,10 @@ def _save_data_unlocked(df):
             os.unlink(temporary)
 
 
-def load_data():
-    if os.path.exists(DATA_PATH):
-        with open(DATA_PATH, "rb") as f:
+def load_data(*, path=None):
+    path = Path(path or DATA_PATH)
+    if path.exists():
+        with path.open("rb") as f:
             # bandit B301: DATA_PATH is written by save_data() on this machine,
             # so it is not untrusted input. If the cache ever becomes something
             # a third party can supply, switch to a non-executable format
