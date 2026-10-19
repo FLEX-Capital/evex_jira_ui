@@ -18,3 +18,6 @@ __pycache__/*
 
 # Generated board deck - rebuild with `uv run --group dev python build_board_deck.py`
 amparex_ai_leverage_board.pptx
+
+# Superpowers Docs, these are Coding Rooms generated docs, and are not committed to the repo.
+docs/superpowers/*
