@@ -375,5 +375,35 @@ class TransformationTests(unittest.TestCase):
         self.assertTrue(bootstrapped["key"].is_unique)
 
 
+class CalendarDayResolutionTests(unittest.TestCase):
+    def test_calendar_days_follow_berlin_dates_across_clock_changes(self):
+        from data_transformation import enrich_jira_time_metrics
+
+        for created, resolved, days in [
+            ("2026-03-29T09:00:00+02:00", "2026-03-30T09:00:00+02:00", 1),
+            ("2026-10-25T09:00:00+01:00", "2026-10-26T09:00:00+01:00", 1),
+            ("2026-03-29T00:30:00+01:00", "2026-03-29T23:30:00+02:00", 0),
+        ]:
+            with self.subTest(created=created):
+                frame = pd.DataFrame(
+                    [
+                        dict(
+                            created=created,
+                            updated=resolved,
+                            currentstatus_date=resolved,
+                            currentstatus_name="Fertig",
+                        )
+                    ]
+                )
+                result = enrich_jira_time_metrics(frame)
+                self.assertEqual(
+                    result.loc[0, "time_to_resolution_calendar_days"], days
+                )
+                self.assertEqual(
+                    result.loc[0, "resolution"],
+                    "Same day" if days == 0 else "> 1 day",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

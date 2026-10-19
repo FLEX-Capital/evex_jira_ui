@@ -89,7 +89,8 @@ def enrich_jira_time_metrics(
 
     # ---------- calendar days (0 if same calendar day; only for done) ----------
     out["time_to_resolution_calendar_days"] = (
-        out["resolved_at"].dt.normalize() - out[created_col].dt.normalize()
+        out["resolved_at"].dt.tz_localize(None).dt.normalize()
+        - out[created_col].dt.tz_localize(None).dt.normalize()
     ).dt.days
     out.loc[~out["is_done"], "time_to_resolution_calendar_days"] = np.nan
 
