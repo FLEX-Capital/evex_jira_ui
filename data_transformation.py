@@ -378,6 +378,8 @@ def _escalation_cell(fields, field_name):
 
 
 def _asset_label(issue, field_name):
+    if (issue.get("category_status") or {}).get(field_name) == "unassigned":
+        return "Nicht zugeordnet"
     fields = issue.get("fields") or {}
     object_id = _asset_id(fields, field_name)
     normal_marker = any(

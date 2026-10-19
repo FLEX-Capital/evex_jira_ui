@@ -8,8 +8,8 @@ import requests
 from dotenv import load_dotenv
 
 
-def fetch_issue_sources(keys):
-    """Read just the source field, leaving absent/inaccessible issues untouched."""
+def fetch_issue_fields(keys, fields):
+    """Batch-read selected fields; omitted issues/fields stay distinguishable."""
     keys = list(dict.fromkeys(keys))
     if not keys:
         return {}
@@ -23,16 +23,17 @@ def fetch_issue_sources(keys):
     if not all((base, username, password)):
         raise RuntimeError("Jira-Zugangsdaten fehlen in der Konfiguration.")
 
-    sources = {}
+    results = {}
     with requests.Session() as session:
         session.auth = (username, password)
         for offset in range(0, len(keys), 100):
             batch = keys[offset : offset + 100]
             payload = {
                 "jql": f"key in ({','.join(batch)}) ORDER BY key",
-                "fields": ["customfield_10675"],
+                "fields": fields,
                 "maxResults": 100,
             }
+            tokens = set()
             while True:
                 response = session.post(
                     f"{base}/rest/api/3/search/jql", json=payload, timeout=30
@@ -40,16 +41,24 @@ def fetch_issue_sources(keys):
                 response.raise_for_status()
                 page = response.json()
                 for issue in page.get("issues", []):
-                    fields = issue.get("fields", {})
-                    if "customfield_10675" in fields:
-                        sources[issue["key"]] = (fields["customfield_10675"] or {}).get(
-                            "value", ""
-                        )
+                    results[issue["key"]] = issue.get("fields") or {}
                 token = page.get("nextPageToken")
                 if not token:
                     break
+                if token in tokens:
+                    raise RuntimeError("Jira repeated a pagination token")
+                tokens.add(token)
                 payload["nextPageToken"] = token
-    return sources
+    return results
+
+
+def fetch_issue_sources(keys):
+    """Read just the source field, leaving absent/inaccessible issues untouched."""
+    return {
+        key: (fields["customfield_10675"] or {}).get("value", "")
+        for key, fields in fetch_issue_fields(keys, ["customfield_10675"]).items()
+        if "customfield_10675" in fields
+    }
 
 
 def refresh_missing_sources(df, fetch_sources=fetch_issue_sources):

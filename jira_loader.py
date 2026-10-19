@@ -50,7 +50,12 @@ def fetch_asset_object(
     workspace_id: str = WORKSPACE_ID,
     object_id: str | None = None,
 ):
-    """Fetch a Jira Assets (Insight) object via the Atlassian Cloud Assets REST API."""
+    """Cache successful Assets responses for existing non-category callers."""
+    return fetch_asset_object_uncached(cloud_id, workspace_id, object_id)
+
+
+def fetch_asset_object_uncached(cloud_id, workspace_id, object_id):
+    """Read an Assets object without retaining an unlabeled response."""
     url = f"https://api.atlassian.com/ex/jira/{cloud_id}/jsm/assets/workspace/{workspace_id}/v1/object/{object_id}"
     # url = f"{JIRA_URL.rstrip('/')}/gateway/api/jsm/assets/workspace/{workspace_id}/v1/object/{object_id}"
     return jira_request(url)
@@ -176,7 +181,7 @@ ASSET_FIELDS = (
 )
 
 
-def enrich_issue_assets(issue):
+def enrich_issue_assets(issue, *, category_resolver=None):
     """Resolve only normal-workspace references; retain explicit optional failures."""
     result = dict(issue)
     result.pop("customer", None)
@@ -185,7 +190,19 @@ def enrich_issue_assets(issue):
     result["asset_errors"] = []
     result["assets_cloud_id"] = CLOUD_ID
     result["assets_workspace_id"] = WORKSPACE_ID
+    # Explicit contexts span all projects and the later cache-repair pass.
+    from category_sync import CATEGORY_FIELDS, CategoryResolver
+
+    category_resolver = category_resolver or CategoryResolver(fetch=fetch_asset_object)
+    category_fields = {item[0] for item in CATEGORY_FIELDS}
+    result["category_status"] = {}
     for field in ASSET_FIELDS:
+        if (
+            field in category_fields
+            and field in (issue.get("fields") or {})
+            and not issue["fields"][field]
+        ):
+            result["category_status"][field] = "unassigned"
         for ref in issue.get("fields", {}).get(field) or []:
             object_id = str(ref.get("objectId", ""))
             workspace = ref.get("workspaceId")
@@ -193,6 +210,17 @@ def enrich_issue_assets(issue):
                 result["asset_errors"].append(
                     f"{field}: unresolved workspace reference {object_id}"
                 )
+                continue
+            if field in category_fields:
+                resolved = category_resolver.resolve(CLOUD_ID, WORKSPACE_ID, object_id)
+                if resolved.label:
+                    result["asset_labels"][object_id] = resolved.label
+                    result["category_status"][field] = "resolved"
+                else:
+                    result["category_status"][field] = "unresolved"
+                    result["asset_errors"].append(
+                        f"{field}/{object_id}: {resolved.error}"
+                    )
                 continue
             try:
                 asset = fetch_asset_object(CLOUD_ID, WORKSPACE_ID, object_id)
@@ -252,6 +280,7 @@ def fetch_jira_issues(
     progress_cb=None,
     partial_cb=None,
     partial_every=100,
+    category_resolver=None,
 ):
     if not re.fullmatch(r"[A-Z][A-Z0-9_]*", project):
         raise ValueError("Invalid Jira project key")
@@ -275,6 +304,10 @@ def fetch_jira_issues(
         upper = end_dt.astimezone(account_tz) + timedelta(minutes=1)
         clauses.append(f"created < '{upper:%Y-%m-%d %H:%M}'")
     jql = " AND ".join(clauses) + " ORDER BY created DESC"
+    if category_resolver is None:
+        from category_sync import CategoryResolver
+
+        category_resolver = CategoryResolver(fetch=fetch_asset_object)
     all_issues = []
     next_token = None
     seen_tokens = set()
@@ -296,7 +329,7 @@ def fetch_jira_issues(
         batch = page["issues"]
         fetched += len(batch)
         kept = [
-            enrich_issue_assets(trim_issue(issue))
+            enrich_issue_assets(trim_issue(issue), category_resolver=category_resolver)
             for issue in filter_issue_window(project, batch, start_dt, end_dt)
         ]
         all_issues.extend(kept)
