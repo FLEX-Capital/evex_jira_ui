@@ -1,5 +1,13 @@
 # Jira Analytics Dashboard
 
+Repository tooling is based on
+[`flex-capital/flex_copier_template`](https://github.com/flex-capital/flex_copier_template)
+v0.1.7. Copier answers are saved in `.copier-answers.yml`; update with
+`copier update --trust --skip-tasks` and review the merge. The template is adapted
+to this application's flat module layout and Python 3.12 Docker runtime.
+Install development tools with `uv sync --frozen`, run tests and coverage with
+`uv run --frozen pytest`, and install Git hooks with `trunk git-hooks sync`.
+
 Streamlit analytics for the service desks on `amparex.atlassian.net`:
 
 | Company | Project | Jira project ID        | Service desk ID        |

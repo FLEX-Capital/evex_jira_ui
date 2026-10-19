@@ -1,0 +1,9 @@
+# Changes here will be overwritten by Copier
+_commit: v0.1.7
+_src_path: gh:flex-capital/flex_copier_template
+author_email: engineering@flex.capital
+author_name: Flex Capital
+ci_provider: github_actions
+description: Streamlit analytics dashboard for EVEX Jira service desks
+project_name: EVEX Jira UI
+python_version: "3.12"

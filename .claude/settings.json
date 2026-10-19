@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/secrets/**)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/.aws/**)",
+      "Read(**/.ssh/**)",
+      "Read(**/*.p12)",
+      "Read(**/*.pfx)",
+      "Read(**/*.keystore)",
+      "Write(**/uv.lock)",
+      "Edit(**/uv.lock)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // empty' | { read -r f && [ -n \"$f\" ] && trunk fmt \"$f\"; } 2>/dev/null || true",
+            "statusMessage": "Formatting edited file..."
+          }
+        ]
+      }
+    ]
+  }
+}
