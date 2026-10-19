@@ -1,11 +1,11 @@
 import json
 
 import pandas as pd
+from test_sync_service import raw, request
 
 import desk_sync
 import source_sync
 import sync_checkpoints
-from test_sync_service import raw, request
 
 
 def test_sidebar_raw_snapshot_combines_successful_desks_and_accepts_zero_results(

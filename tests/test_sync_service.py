@@ -5,12 +5,12 @@ from datetime import UTC, datetime
 
 import pandas as pd
 import pytest
+from test_transformation import issue
 
 import data_loading
 import desk_sync
 import jira_loader
 import sync_checkpoints
-from test_transformation import issue
 
 START = datetime(2026, 9, 1, tzinfo=UTC)
 END = datetime(2026, 9, 10, tzinfo=UTC)

@@ -54,7 +54,7 @@ class CheckpointStore:
         resume from if we know which window produced it, and that has to be on disk
         before the first issue is, not after.
         """
-        (log_path, meta_path) = self._partial_paths(project)
+        log_path, meta_path = self._partial_paths(project)
         os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
         write_json_atomic(
             meta_path,
@@ -80,7 +80,7 @@ class CheckpointStore:
 
     def _reopen_partial(self, project):
         """Appender for a partial log that already exists, leaving its lines intact."""
-        (log_path, _) = self._partial_paths(project)
+        log_path, _ = self._partial_paths(project)
         # A new append must not follow a torn JSON fragment or concatenate with
         # a complete record whose newline was interrupted. Keep the valid prefix.
         with open(log_path, "r+b") as handle:
@@ -123,7 +123,7 @@ class CheckpointStore:
         The end may differ (a default end of "now" moves between runs); the caller
         fetches anything newer than `logged_end` and trims to its own window.
         """
-        (log_path, meta_path) = self._partial_paths(project)
+        log_path, meta_path = self._partial_paths(project)
         if not (os.path.exists(log_path) and os.path.exists(meta_path)):
             return ([], None, None)
         with open(meta_path) as handle:
@@ -164,8 +164,8 @@ class CheckpointStore:
 
     def _fmt_duration(self, seconds):
         seconds = int(seconds)
-        (h, rem) = divmod(seconds, 3600)
-        (m, s) = divmod(rem, 60)
+        h, rem = divmod(seconds, 3600)
+        m, s = divmod(rem, 60)
         return f"{h}h{m:02d}m" if h else f"{m}m{s:02d}s"
 
     def _make_progress(self, project, started):
@@ -224,11 +224,9 @@ class CheckpointStore:
                             issue, category_resolver=category_resolver
                         )
                 fetch_start = max(start_dt, saved_end)
-        (partial, oldest_partial, partial_end) = ([], None, None)
+        partial, oldest_partial, partial_end = ([], None, None)
         if resume:
-            (partial, oldest_partial, partial_end) = self.load_partial(
-                project, start_dt
-            )
+            partial, oldest_partial, partial_end = self.load_partial(project, start_dt)
             if partial:
                 self._say(
                     f"[{project}] resuming: {len(partial)} issues already saved, oldest {oldest_partial.isoformat()}",

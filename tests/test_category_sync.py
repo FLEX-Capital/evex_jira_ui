@@ -237,9 +237,10 @@ def test_category_repair_rejects_a_concurrent_unrelated_reference():
 
 
 def test_verified_empty_raw_field_is_unassigned_in_current_schema():
+    from test_transformation import issue
+
     import category_sync as categories
     from data_transformation import load_project_issues
-    from test_transformation import issue
 
     raw = issue(main_id=None, sub_id=None)
     raw["fields"]["customfield_10673"] = []

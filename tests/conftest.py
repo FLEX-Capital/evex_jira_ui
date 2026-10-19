@@ -14,11 +14,12 @@ def forbid_unmocked_network(monkeypatch):
 
 @pytest.fixture
 def storage(tmp_path, monkeypatch):
+    from test_sync_service import raw
+
     import asset_country
     import category_sync
     import data_loading
     import jira_loader
-    from test_sync_service import raw
 
     path = tmp_path / "cache.pkl"
     monkeypatch.setattr(data_loading, "DATA_PATH", str(path))

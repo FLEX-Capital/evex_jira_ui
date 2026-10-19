@@ -6,8 +6,8 @@ import pytest
 import backfill_jira as backfill
 import data_loading
 import desk_sync
-import sync_checkpoints
 import jira_loader
+import sync_checkpoints
 from category_sync import CategoryRepairReport
 
 

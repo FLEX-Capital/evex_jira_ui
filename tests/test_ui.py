@@ -247,10 +247,12 @@ def test_sidebar_submits_all_desks_despite_company_display_filter(
     tmp_path, monkeypatch
 ):
     import os
+
+    from test_temporary_history_pull import FakeJobs
+
     import data_loading
     import sync_jobs
     import ui_auth
-    from test_temporary_history_pull import FakeJobs
 
     monkeypatch.setattr(data_loading, "DATA_PATH", str(tmp_path / "cache.pkl"))
     monkeypatch.setattr(ui_auth, "ENV_FILE", os.devnull)

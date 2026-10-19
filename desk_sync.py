@@ -11,8 +11,6 @@ from uuid import uuid4
 
 import pandas as pd
 
-from service_desks import BY_KEY
-
 from category_sync import (
     CATEGORY_FIELDS,
     CategoryLookup,
@@ -24,6 +22,7 @@ from category_sync import (
     unknown,
     unresolved_cells,
 )
+from service_desks import BY_KEY
 
 
 def write_json_atomic(path, value):
@@ -416,7 +415,9 @@ def run_sync(request, *, progress=None, data_path=None):
                                 merged.loc[index].get("source")
                             ) and text_value(
                                 merged.loc[index].get("updated")
-                            ) == text_value(expected_updated):
+                            ) == text_value(
+                                expected_updated
+                            ):
                                 merged.loc[index, "source"] = source
                                 report.source_updates += 1
                     report.categories.unresolved_cells = unresolved_cells(merged)
@@ -436,7 +437,9 @@ def run_sync(request, *, progress=None, data_path=None):
                             run_id=status["run_id"],
                             request=request,
                         )
-                    except Exception as exc:  # noqa: BLE001 - cache was already committed
+                    except (
+                        Exception
+                    ) as exc:  # noqa: BLE001 - cache was already committed
                         report.raw_error = type(exc).__name__
         except Exception as exc:  # noqa: BLE001 - persist failure before releasing lock
             report.save_error = f"{type(exc).__name__}: {exc}"

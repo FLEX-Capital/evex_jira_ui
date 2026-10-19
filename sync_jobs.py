@@ -44,7 +44,9 @@ class SyncJobs:
                 run_sync(request, progress=progress, data_path=data_path)
             except data_loading.ImportBusyError:
                 pass
-            except Exception as exc:  # noqa: BLE001 - expose pre-admission/storage failures
+            except (
+                Exception
+            ) as exc:  # noqa: BLE001 - expose pre-admission/storage failures
                 with self.lock:
                     self.failure = (
                         data_path,

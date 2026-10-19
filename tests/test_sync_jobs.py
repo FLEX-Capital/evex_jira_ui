@@ -6,11 +6,11 @@ import threading
 
 import pandas as pd
 import pytest
+from test_sync_service import raw, request
 
 import data_loading
 import desk_sync
 import sync_checkpoints
-from test_sync_service import raw, request
 
 
 def test_worker_saves_without_another_ui_run(storage, monkeypatch):
@@ -135,11 +135,13 @@ def test_cli_and_both_ui_controls_produce_identical_schema_after_category_retry(
     storage, monkeypatch
 ):
     from unittest.mock import Mock
+
+    import requests
     from streamlit.testing.v1 import AppTest
+
     import backfill_jira
     import category_sync
     import jira_loader
-    import requests
     import sync_jobs
 
     jira = Mock()

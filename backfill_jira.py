@@ -97,9 +97,11 @@ def main(argv=None):
         if getattr(report, name):
             print(f"{name}: {getattr(report, name)}")
     print(
-        "Import completed."
-        if report.complete
-        else "Import incomplete; resolve the reported failures and retry.",
+        (
+            "Import completed."
+            if report.complete
+            else "Import incomplete; resolve the reported failures and retry."
+        ),
         flush=True,
     )
     return 0 if report.complete else 1

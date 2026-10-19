@@ -273,7 +273,7 @@ class PartialResumeTests(unittest.TestCase):
 
     def test_interrupted_fetch_leaves_a_resumable_log(self):
         self._write_partial([self._issue(10), self._issue(11)])
-        (loaded, oldest, _) = backfill.load_partial("SDAX", self.start)
+        loaded, oldest, _ = backfill.load_partial("SDAX", self.start)
         self.assertEqual(sorted((i["key"] for i in loaded)), ["SDAX-10", "SDAX-11"])
         self.assertEqual(oldest, datetime(2026, 8, 10, tzinfo=UTC))
 
@@ -295,7 +295,7 @@ class PartialResumeTests(unittest.TestCase):
 
     def test_moved_end_keeps_the_log_and_fetches_only_what_it_lacks(self):
         oldest = datetime(2026, 8, 10, tzinfo=UTC)
-        (later, earlier) = (self.end + timedelta(days=2), self.end - timedelta(days=2))
+        later, earlier = (self.end + timedelta(days=2), self.end - timedelta(days=2))
         cases = {
             later: [(self.start, oldest), (self.end, later)],
             earlier: [(self.start, oldest)],
@@ -307,7 +307,7 @@ class PartialResumeTests(unittest.TestCase):
                 fetched = []
 
                 def fetch(first, last, _fetched=fetched, **kwargs):
-                    (log, _) = backfill._partial_paths("SDAX")
+                    log, _ = backfill._partial_paths("SDAX")
                     _fetched.append((first, last, Path(log).read_text().count("\n")))
                     return []
 
@@ -321,22 +321,22 @@ class PartialResumeTests(unittest.TestCase):
         self._write_partial([self._issue(10)])
         with patch.object(backfill, "fetch_jira_issues", return_value=[]):
             backfill.fetch_project("SDAX", self.start, self.end, True)
-        (log, meta) = backfill._partial_paths("SDAX")
+        log, meta = backfill._partial_paths("SDAX")
         self.assertFalse(Path(log).exists())
         self.assertFalse(Path(meta).exists())
 
     def test_torn_final_line_costs_one_issue_not_the_whole_log(self):
         self._write_partial([self._issue(10), self._issue(11)])
-        (log, _) = backfill._partial_paths("SDAX")
+        log, _ = backfill._partial_paths("SDAX")
         with open(log, "a") as handle:
             handle.write('{"key": "SDAX-12", "fields": {"crea')
-        (loaded, oldest, _) = backfill.load_partial("SDAX", self.start)
+        loaded, oldest, _ = backfill.load_partial("SDAX", self.start)
         self.assertEqual(sorted((i["key"] for i in loaded)), ["SDAX-10", "SDAX-11"])
         self.assertEqual(oldest, datetime(2026, 8, 10, tzinfo=UTC))
 
     def test_log_from_a_different_window_is_ignored_not_merged(self):
         self._write_partial([self._issue(10)])
-        (loaded, oldest, _) = backfill.load_partial(
+        loaded, oldest, _ = backfill.load_partial(
             "SDAX", self.start + timedelta(days=1)
         )
         self.assertEqual(loaded, [])
@@ -355,11 +355,11 @@ class CheckpointPathTests(unittest.TestCase):
     def test_partial_paths_follow_the_patched_checkpoint(self):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(backfill, "template", tmp + "/{project}.json"):
-                (log, meta) = backfill._partial_paths("SDAX")
+                log, meta = backfill._partial_paths("SDAX")
             self.assertTrue(log.startswith(tmp), log)
             self.assertTrue(meta.startswith(tmp), meta)
 
     def test_default_partial_paths_sit_beside_the_default_checkpoint(self):
-        (log, meta) = backfill._partial_paths("SDAX")
+        log, meta = backfill._partial_paths("SDAX")
         self.assertEqual(log, "data/backfill_SDAX.partial.ndjson")
         self.assertEqual(meta, "data/backfill_SDAX.partial.json")
