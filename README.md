@@ -72,45 +72,70 @@ and extended through the current import time. A valid zero-ticket result succeed
 without changing the cache. Partial project failures return a nonzero exit status
 while successful project results are merged.
 
+The CLI uses the shared import service. It automatically repairs unresolved
+`Hauptkategorie` and `Unterkategorie` values, including older cached tickets outside
+the selected date window. Category references are verified against Jira, shared
+object lookups are deduplicated, and transient failures are retried up to three
+times. A verified empty category is `Nicht zugeordnet`; inaccessible or unresolved
+categories remain visible and make the command exit nonzero. `--resume` reuses
+compatible raw snapshots; it does not freshly download older checkpointed issues.
+
 If an existing Euronet checkpoint starts at the former September 2026 boundary,
 run the first expanded backfill **without `--resume`**. A checkpoint covering
 only recent tickets cannot establish coverage for an earlier requested start.
-The temporary full-history button below always fetches its entire window.
+A new UI import fetches its selected window freshly. The explicit **Import
+fortsetzen** action resumes a compatible interrupted or incomplete request.
 
-## Temporary full-history button
+An interrupted partial download is reused when `--resume` uses the same start.
+Its saved tickets are kept; the older remainder is fetched, plus any tickets
+created after the interrupted run's end (for example when the default end of
+"now" has moved on). A partial download from a different start is discarded.
+
+## Temporary backfill / import button
 
 In the collapsed **Interaktiv → Daten aktualisieren** section, the Ursprung and
 Länder update buttons sit alongside **Backfill / Datenimport**. Pick a creation
 date range and one or more service desks, then use **Ausgewählte Tickets laden**.
 The defaults are 1 January 2025 through today, with Ipro, Amparex and Euronet
 all selected. Both selected days are included in full in Berlin time; today
-ends at the import start time. An incomplete date range or empty desk selection
-disables the import button. The selection is frozen while the import runs.
+ends at the import start time. A page left open past midnight moves an end date
+of "today" to the new day; any other chosen end date is kept. An incomplete
+date range, a start after the end, or an empty desk selection disables the
+import button. If another session started an import after this page was drawn,
+the click is rejected with a warning; start again once that import finishes.
+The selection is frozen while the import runs and stays visible if it fails.
 These import controls are independent of the sidebar company/date filters.
-Expand the sidebar date range afterward to include this history in the charts.
+Expand the sidebar date range afterward to include this history in the charts;
+both pickers reach back to 1970.
 
-The background thread survives page reruns and browser reconnects. Progress is
-polled every five seconds while the page is open. Return to the dashboard to
-merge a finished download into the latest cache: existing ticket keys are
-updated, new tickets appended, and older/unrelated rows retained. Rows changed
-in the cache while the import was running are retained in full, as are cached
-rows with newer Jira update timestamps. This preserves intervening ticket,
-Ursprung, category, and country updates; rerun the import later to refresh any
-rows retained because of concurrent changes. A
-`data/jira_data.pkl.bak-history-*` backup is made before saving. Failed desks
-retain their cached data and are reported separately; Assets lookup failures
-remain visible as warnings, including unresolved category labels.
+Both the sidebar refresh and the custom import use one shared background worker
+and the same service as `backfill_jira.py`. Progress is polled every five seconds.
+The worker merges and saves automatically, even if the browser is closed. Existing
+ticket keys are updated, new tickets appended, and older/unrelated rows retained.
+Rows changed during the fetch and rows with newer Jira timestamps are protected;
+protected/skipped rows are reported so they are not mistaken for refreshed data.
+Category repair applies narrow patches, preserving concurrent country/source
+changes and labels that another writer has already resolved.
 
-Cache commits use a shared file lock across dashboard sessions and CLI writers.
-Maintenance actions based on a stale cache snapshot stop with a retry message
-instead of overwriting another writer's result. Every open dashboard session
-reloads once when it observes a completed import, including sessions that did
-not start or apply the import.
+One operation lock prevents competing UI/CLI imports against the same data
+folder. A short separate cache lock protects the final merge and atomic save;
+Jira and Assets network requests do not hold it. Changed existing caches receive
+one `data/jira_data.pkl.bak-sync-*` backup. Failed desks keep their previous data.
+Remaining category/Assets failures produce an incomplete result, never a plain
+success. Source and country maintenance retain their own guarded commit paths.
 
-This temporary worker runs once per server process. A server restart discards
-an unfinished/unapplied download; start it again afterward. It is intended for
-the existing single-process deployment, not multiple application replicas.
-Use the CLI backfill above if resumable disk checkpoints are required.
+Every open dashboard reloads when it observes a changed cache revision, including
+CLI changes. Request/status metadata lives in `data/import_status.json`; it does
+not contain ticket text or a full dataframe and is not the concurrency lock.
+A server restart interrupts the thread but retains disk checkpoints. The UI
+reports an interrupted request and offers **Import fortsetzen**. This deployment
+still assumes one application replica; Azure Files locking/atomic replacement
+must be verified before adding a separate Azure import job.
+
+The sidebar keeps its current scope: all three desks in its selected creation-date
+window, regardless of the company display filter. Only the sidebar automatically
+repairs missing Ursprung values across the cache and publishes the combined raw
+`jira_issues.json` snapshot. Country resolution remains a separate action.
 
 Removal: delete `temporary_history_pull.py`,
 `tests/test_temporary_history_pull.py`, this README section, and the
@@ -196,17 +221,22 @@ first run can take a while.
 
 ## Storage and validation
 
-The dashboard reads `data/jira_data.pkl`. Backfills use key-based upserts with
-backups; saves use atomic file replacement. Avoid refreshing the dashboard while
-a CLI import or cache migration is writing. To roll back a migration, stop writers
-and restore its backup to `data/jira_data.pkl`.
+The dashboard reads `data/jira_data.pkl`. Imports use key-based upserts with
+backups and atomic file replacement. The CLI and both UI import controls share
+an operation lock; a competing import is rejected while one is active. Safe
+merging preserves intervening source/country maintenance updates. To roll back
+a migration, stop writers and restore its backup to `data/jira_data.pkl`.
 
 A fully successful dashboard refresh writes all desks' fetched raw results once
 to `data/jira_issues.json`. A project failure preserves the previous raw snapshot.
 This JSON represents the fetched window, not the full historical pickle cache.
+Its `data/jira_issues.meta.json` companion retains the originating run ID, request
+window and desks, publication time, issue count, and SHA-256 digest even after a
+later import replaces the shared status. The digest must match the raw file
+before using that metadata: publication errors can leave an older sidecar.
 
 ```sh
-uv run --no-sync python -m unittest discover -s tests
+uv run --no-sync python -m pytest -q
 ```
 
 Tests cover company subsets and Streamlit rendering, import timezone boundaries,

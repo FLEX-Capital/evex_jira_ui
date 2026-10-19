@@ -1,5 +1,4 @@
-from datetime import datetime, time, timedelta
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta
 
 import pandas as pd
 import plotly.express as px
@@ -33,10 +32,18 @@ from plotting import (
     generate_distinct_colors,
 )
 from resolution_bands import BAND_COLORS, BAND_NOT_DONE, BAND_ORDER, BAND_UNDER_1H
-from service_desks import COMPANY_LABELS, DESKS, filter_companies
+from service_desks import (
+    BERLIN,
+    COMPANY_LABELS,
+    EARLIEST_DAY,
+    berlin_day_end,
+    berlin_day_start,
+    filter_companies,
+)
 from source_sync import refresh_missing_sources
 from styles import CUSTOM_CSS
 from temporary_history_pull import render_history_pull
+from sync_jobs import render_sidebar_refresh
 from ui_auth import require_password
 
 # set to dark mode
@@ -68,17 +75,22 @@ try:
 except Exception:  # noqa: BLE001 - allow an unavailable legacy cache
     df = pd.DataFrame()
     df_old = pd.DataFrame()
+    cache_revision = current_cache_revision()
 
-# The whole dashboard reports in Berlin local time: `created` is stored as
-# Europe/Berlin (data_transformation.TZ), and the service desk works Berlin hours.
-BERLIN = ZoneInfo("Europe/Berlin")
+st.session_state["_sync_seen_revision"] = cache_revision
+
+# The whole dashboard reports in Berlin local time (service_desks.BERLIN): `created`
+# is stored as Europe/Berlin (data_transformation.TZ), and the service desk works
+# Berlin hours.
 
 # Optional global filters in sidebar.
 # `now` must be Berlin-local, not UTC: between 00:00 and 02:00 Berlin the UTC date
 # is still the previous day, which silently shifted the default window back a day.
 start_date = datetime.now(BERLIN) - timedelta(days=7)
 end_date = datetime.now(BERLIN)
-picked = st.sidebar.date_input("Zeitraum (erstellt)", value=(start_date, end_date))
+picked = st.sidebar.date_input(
+    "Zeitraum (erstellt)", value=(start_date, end_date), min_value=EARLIEST_DAY
+)
 
 # While a range is being picked, Streamlit reruns after the FIRST click and
 # returns a 1-tuple; unpacking that straight into two names raised
@@ -95,8 +107,7 @@ else:
 
 # The picked day must span 00:00-23:59:59 Berlin. Building these in UTC shifted the
 # window by 1-2h, so tickets created just after Berlin midnight fell outside it.
-start_dt = datetime.combine(start_date, time.min, tzinfo=BERLIN)
-end_dt = datetime.combine(end_date, time.max, tzinfo=BERLIN)
+start_dt, end_dt = berlin_day_start(start_date), berlin_day_end(end_date)
 
 # toggle to switch between week_string and created_string
 if st.sidebar.toggle("Auf Wochenbasis"):
@@ -108,54 +119,8 @@ else:
 
 st.sidebar.write("JIRA Daten aktualisieren.")
 
-if st.sidebar.button("🔄 aktualisieren"):
-    from desk_sync import refresh_desks
-
-    with st.spinner("Jira-Tickets werden für alle Firmen aktualisiert …"):
-        result = refresh_desks(df_old, start_dt, end_dt)
-    df = result.frame
-    for desk in DESKS:
-        if desk.key in result.errors:
-            st.sidebar.error(
-                f"{desk.label}: Aktualisierung fehlgeschlagen: {result.errors[desk.key]}"
-            )
-        else:
-            st.sidebar.info(f"{desk.label}: {result.counts[desk.key]} Tickets geladen.")
-        failures = result.asset_failures.get(desk.key, 0)
-        if failures:
-            st.sidebar.warning(
-                f"{desk.label}: Assets-Daten bei {failures} Tickets unvollständig. "
-                "Kategorien können deshalb als Unbekannt erscheinen. "
-                "Bei HTTP 403: Schema-/Objekttyp-Berechtigungen des in "
-                "JIRA_USERNAME konfigurierten Kontos prüfen."
-            )
-    if result.counts and not df.empty:
-        try:
-            df, sources_updated = refresh_missing_sources(df)
-            st.sidebar.info(
-                f"{sources_updated} fehlende Ursprünge aus Jira übernommen."
-            )
-        except Exception as exc:  # noqa: BLE001 - report optional/isolated failures
-            st.sidebar.warning(f"Ursprung-Abgleich fehlgeschlagen: {exc}")
-        try:
-            save_data_if_unchanged(df, cache_revision)
-        except CacheChangedError as exc:
-            st.sidebar.error(str(exc))
-            st.stop()
-        if not result.errors and not any(result.asset_failures.values()):
-            st.sidebar.success(
-                f"Aktualisierung abgeschlossen: {len(df)} Tickets gespeichert."
-            )
-        elif result.errors:
-            st.sidebar.warning(
-                "Erfolgreiche Abrufe gespeichert; vorhandene Tickets fehlgeschlagener Firmen bleiben erhalten."
-            )
-        else:
-            st.sidebar.warning(
-                f"{len(df)} Tickets gespeichert; Assets-Daten unvollständig. "
-                "Technische Fehlerdetails stehen in data/jira_issues.json "
-                "unter asset_errors."
-            )
+with st.sidebar:
+    render_sidebar_refresh(start_dt, end_dt)
 
 if not selected_companies:
     st.info("Bitte mindestens eine Firma auswählen.")

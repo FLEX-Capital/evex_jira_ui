@@ -243,5 +243,31 @@ class StaleCountryRefreshUITests(unittest.TestCase):
             save_tickets.assert_not_called()
 
 
+def test_sidebar_submits_all_desks_despite_company_display_filter(
+    tmp_path, monkeypatch
+):
+    import os
+    import data_loading
+    import sync_jobs
+    import ui_auth
+    from test_temporary_history_pull import FakeJobs
+
+    monkeypatch.setattr(data_loading, "DATA_PATH", str(tmp_path / "cache.pkl"))
+    monkeypatch.setattr(ui_auth, "ENV_FILE", os.devnull)
+    monkeypatch.delenv("UI_PASSWORD", raising=False)
+    jobs = FakeJobs()
+    monkeypatch.setattr(sync_jobs, "JOB", jobs)
+    app = AppTest.from_file("app.py", default_timeout=30).run()
+    app.sidebar.date_input[0].set_value((date(2025, 1, 1), date(2025, 3, 17))).run()
+    app.sidebar.multiselect[0].set_value(["Ipro"]).run()
+    app.button(key="sync_sidebar_start").click().run()
+    assert not app.exception
+    request = jobs.requests[-1]
+    assert request.projects == ("SDIPR", "SDAX", "SDEU")
+    assert request.repair_sources and request.publish_raw and not request.resume
+    assert request.start.isoformat() == "2024-12-31T23:00:00+00:00"
+    assert request.end.isoformat() == "2025-03-17T22:59:59.999999+00:00"
+
+
 if __name__ == "__main__":
     unittest.main()
