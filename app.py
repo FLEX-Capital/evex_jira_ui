@@ -9,21 +9,15 @@ from st_aggrid import AgGrid, GridOptionsBuilder
 from asset_country import (
     NOT_RESOLVED,
     attach_country,
-    refresh_countries,
-    save_cache,
 )
-from asset_country import (
-    load_cache as load_country_cache,
-)
+from asset_country import load_cache as load_country_cache
+from asset_country import refresh_countries, save_cache
 from data_loading import (
     CacheChangedError,
     cache_lock,
-    load_data_snapshot,
-    save_data_if_unchanged,
 )
-from data_loading import (
-    cache_revision as current_cache_revision,
-)
+from data_loading import cache_revision as current_cache_revision
+from data_loading import load_data_snapshot, save_data_if_unchanged
 from interactive import render_interactive
 from plotting import (
     apply_font,
@@ -42,8 +36,8 @@ from service_desks import (
 )
 from source_sync import refresh_missing_sources
 from styles import CUSTOM_CSS
-from temporary_history_pull import render_history_pull
 from sync_jobs import render_sidebar_refresh
+from temporary_history_pull import render_history_pull
 from ui_auth import require_password
 
 # set to dark mode
@@ -367,8 +361,15 @@ with tab_subcategories:
         .reset_index()
     )
     result = result.rename(columns={"key": "Anzahl"})
-    # sort by overall count
+    # Preserve the segment order for the stacks and legend.
     result = result.sort_values("Anzahl", ascending=False)
+    # Order main categories by their combined subcategory counts.
+    sorted_categories = (
+        result.groupby("Hauptkategorie")["Anzahl"]
+        .sum()
+        .sort_values(ascending=False)
+        .index.tolist()
+    )
 
     fig = px.bar(
         result,
@@ -376,6 +377,7 @@ with tab_subcategories:
         y="Anzahl",
         color="Unterkategorie",
         color_discrete_map=color_map,
+        category_orders={"Hauptkategorie": sorted_categories},
     )
     fig = apply_font(fig)
     st.plotly_chart(fig, height=plot_height, width=plot_width)
