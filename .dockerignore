@@ -15,5 +15,21 @@ venv/
 .ruff_cache/
 
 .ipynb_checkpoints/
+# Analysis notebooks keep ticket keys in their outputs; the app does not use them.
+*.ipynb
+
+# Secrets and generated ticket data must never become image layers.
+.env
+.env.*
+**/.env
+**/.env.*
+.aws/
+.codex/
+.agents/
+.claude/
+.streamlit/secrets.toml
+data/*
+!data/evex_logo.png
+!data/object_id_to_name.json
 
 

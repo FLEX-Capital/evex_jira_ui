@@ -31,7 +31,9 @@ code loads `.env` with override enabled. Never commit credentials or ticket cach
 Set `UI_PASSWORD` in `.env` or the server environment to require a login before
 any ticket data or import controls are shown; the `.env` value wins, like the Jira
 credentials. Without it, the dashboard remains accessible
-without a password.
+without a password. Docker builds exclude local environment files, ticket caches,
+and backups; provide credentials at runtime and use persistent storage for `data/`.
+Only the logo and legacy category map from `data/` are bundled in the image.
 
 ## Euronet import
 
