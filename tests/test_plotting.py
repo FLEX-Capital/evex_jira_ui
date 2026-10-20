@@ -6,44 +6,26 @@ order is alphabetical by label, which interleaves the ramp.
 """
 
 import pandas as pd
+import plotly.graph_objects as go
 import pytest
 
 import plotting
 from resolution_bands import BAND_ORDER
 
 
-class _Ctx:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-
-class _Figure:
-    """Absorbs any fig.*() call - we assert on px.bar's kwargs, not the figure."""
-
-    def __getattr__(self, name):
-        def accept(*args, **kwargs):
-            return self
-
-        return accept
-
-
 @pytest.fixture
 def captured(monkeypatch):
-    """Render a chart against stubbed Streamlit/Plotly, return px.bar's kwargs."""
-    seen = {}
-
-    def fake_bar(*args, **kwargs):
-        seen.update(kwargs)
-        return _Figure()
-
-    monkeypatch.setattr(plotting.px, "bar", fake_bar)
+    """Capture actual compatibility-adapter figures without rendering a UI."""
+    seen = []
     monkeypatch.setattr(plotting.st, "radio", lambda *a, **k: plotting.MODE_ABS)
-    monkeypatch.setattr(plotting.st, "plotly_chart", lambda *a, **k: None)
-    monkeypatch.setattr(plotting.st, "columns", lambda *a, **k: (_Ctx(), _Ctx()))
+    monkeypatch.setattr(
+        plotting.st, "plotly_chart", lambda figure, **kw: seen.append(figure)
+    )
     return seen
+
+
+def _groups(captured: list[go.Figure]) -> list[str]:
+    return [trace.name for trace in captured[-1].data if trace.type == "bar"]
 
 
 def _frame():
@@ -56,6 +38,7 @@ def _frame():
 
 
 def test_group_order_is_honoured(captured):
+    """Present compatibility groups retain their explicit meaningful order."""
     plotting.create_toggle_chart(
         _frame(),
         x_col="Land",
@@ -63,7 +46,7 @@ def test_group_order_is_honoured(captured):
         group_order=BAND_ORDER,
         toggle_key="t1",
     )
-    assert captured["category_orders"]["resolution_band"] == BAND_ORDER
+    assert _groups(captured) == BAND_ORDER
 
 
 def test_without_group_order_the_stack_is_not_the_ramp(captured):
@@ -71,10 +54,11 @@ def test_without_group_order_the_stack_is_not_the_ramp(captured):
     plotting.create_toggle_chart(
         _frame(), x_col="Land", group_col="resolution_band", toggle_key="t2"
     )
-    assert captured["category_orders"]["resolution_band"] != BAND_ORDER
+    assert _groups(captured) != BAND_ORDER
 
 
 def test_labels_absent_from_the_data_are_not_charted(captured):
+    """Compatibility legends keep omitting bands absent from the supplied data."""
     df = _frame()
     df = df[df["resolution_band"] != BAND_ORDER[1]]
 
@@ -87,7 +71,7 @@ def test_labels_absent_from_the_data_are_not_charted(captured):
     )
 
     expected = [band for band in BAND_ORDER if band != BAND_ORDER[1]]
-    assert captured["category_orders"]["resolution_band"] == expected
+    assert _groups(captured) == expected
 
 
 def test_unexpected_label_is_appended_not_dropped(captured):
@@ -103,6 +87,6 @@ def test_unexpected_label_is_appended_not_dropped(captured):
         toggle_key="t4",
     )
 
-    order = captured["category_orders"]["resolution_band"]
+    order = _groups(captured)
     assert "Neue Kategorie" in order
     assert order[-1] == "Neue Kategorie"

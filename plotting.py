@@ -1,4 +1,6 @@
 import colorsys
+from collections.abc import Mapping, Sequence
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -7,13 +9,15 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import reporting_policy as reporting
+from chart_data import ChartData, prepare_chart_data
 
 MODE_ABS = "Absolute Zahlen"
 MODE_LOG = "Absolut (log)"
 MODE_REL = "Relativ (%)"
 
 
-def generate_distinct_colors(n):
+def generate_distinct_colors(n: int) -> list[str]:
+    """Return evenly spaced categorical colors."""
     # evenly spaced hues in HSV space
     hues = np.linspace(0, 1, n, endpoint=False)
     colors = []
@@ -108,146 +112,139 @@ def create_resolution_time_charts(df: pd.DataFrame) -> list[go.Figure]:
 
 
 def create_toggle_chart(
-    df,
-    x_col,
-    group_col,
-    count_col="key",
-    x_label=None,
-    toggle_key="default_key",
-    color_map=None,
-    force_bottom_value=None,
-    group_order=None,
-    sort_x_by_total=False,
-    plot_height=400,
-    plot_width=None,
-    allow_log=False,
-):
-    """
-    Generates a stacked bar chart with:
-    - Toggle between Absolute/Relative view
-    - Percentages inside bars
-    - Totals on top of bars
-    - Custom ordering and coloring
-    """
-
-    # 1. Data Preparation
-    # Group and count
-    df = df.copy()
-    for column in dict.fromkeys([x_col, group_col]):
-        df[column] = (
-            df[column].astype("string").fillna("").str.strip().replace("", "Unbekannt")
-        )
-    result = (
-        df[[x_col, group_col, count_col]]
-        .groupby([x_col, group_col])
-        .count()
-        .reset_index()
-    )
-
-    # Calculate Totals & Percentages per stack
-    total_per_group = result.groupby(x_col)[count_col].transform("sum")
-    result["percentage"] = result[count_col] / total_per_group
-
-    # Custom Labels: "Count <br> (Percent)"
-    result["custom_label"] = result.apply(
-        lambda x: f"{x[count_col]}<br>({x['percentage']:.0%})", axis=1
-    )
-
-    # 2. Ordering Logic
-    # Group Order (Stack Order)
-    present = result[group_col].unique().tolist()
-    if group_order:
-        # Caller-supplied order (e.g. a colour ramp that only reads correctly
-        # in sequence). Without it the stack follows whatever order groupby
-        # happened to produce, which is alphabetical by label, not meaningful.
-        known = [value for value in group_order if value in present]
-        group_order = known + [value for value in present if value not in known]
-    else:
-        group_order = present
-    if force_bottom_value and force_bottom_value in group_order:
-        group_order.remove(force_bottom_value)
-        group_order.insert(0, force_bottom_value)  # Insert at 0 to put at bottom
-
-    # X-Axis Order
-    if sort_x_by_total:
-        # Sort X-axis based on total count descending
-        total_counts_index = (
-            result.groupby(x_col)[count_col].sum().sort_values(ascending=False).index
-        )
-    else:
-        total_counts_index = None  # Use default or existing order
-
-    # 3. Calculate Column Totals (for the label on top)
-    column_totals = result.groupby(x_col)[count_col].sum().reset_index()
-
-    # 4. Streamlit Toggle
-    modes = [MODE_ABS, MODE_LOG, MODE_REL] if allow_log else [MODE_ABS, MODE_REL]
-    mode = st.radio(
-        "Ansicht wählen:",
-        modes,
-        horizontal=True,
-        index=0,
-        key=toggle_key,
-    )
-
-    # 5. Configure Variables based on Toggle
-    if mode in (MODE_ABS, MODE_LOG):
-        y_val = count_col
-        y_title = "Anzahl Tickets"
-        y_format = None
-        # Labels for top of bars
-        y_text_pos = column_totals[count_col]
-        text_content = column_totals[count_col].astype(str)
-        # Add 15% buffer
-        y_max = column_totals[count_col].max() * 1.15
-    else:
-        y_val = "percentage"
-        y_title = "Prozentualer Anteil"
-        y_format = ".0%"
-        # Labels for top (100%)
-        y_text_pos = [1] * len(column_totals)
-        text_content = column_totals[count_col].apply(lambda x: f"Total: {x}")
-        y_max = 1.15
-
-    # 6. Plot Base Chart
-    fig = px.bar(
-        result,
+    df: pd.DataFrame,
+    x_col: str,
+    group_col: str,
+    count_col: str = "key",
+    x_label: str | None = None,
+    toggle_key: str = "default_key",
+    color_map: Mapping[str, str] | None = None,
+    force_bottom_value: str | None = None,
+    group_order: Sequence[str] | None = None,
+    sort_x_by_total: bool = False,
+    plot_height: int = 400,
+    plot_width: int | None = None,
+    allow_log: bool = False,
+) -> None:
+    """Render the supported distribution-chart UI compatibility adapter."""
+    data = prepare_chart_data(
+        df,
         x=x_col,
-        y=y_val,
-        color=group_col,
-        text="custom_label",
-        color_discrete_map=color_map,
-        category_orders={group_col: group_order, x_col: total_counts_index},
+        group=group_col,
+        key_col=count_col,
+        group_order=group_order or (),
+        sort_x_by_total=sort_x_by_total,
+    )
+    # Compatibility callers historically omit absent groups from their legend.
+    present = set(data.table.loc[data.table["count"] > 0, "group"])
+    order = [value for value in data.group_order if value in present]
+    if force_bottom_value in order:
+        order.remove(force_bottom_value)
+        order.insert(0, force_bottom_value)
+    data = ChartData(data.table, data.x_order, tuple(order), data.totals, data.cohort)
+    modes = [MODE_ABS, MODE_LOG, MODE_REL] if allow_log else [MODE_ABS, MODE_REL]
+    choice = st.radio(
+        "Ansicht wählen:", modes, horizontal=True, index=0, key=toggle_key
+    )
+    mode: Literal["absolute", "relative", "log"] = (
+        "absolute"
+        if choice == MODE_ABS
+        else "relative" if choice == MODE_REL else "log"
+    )
+    fig = build_distribution_figure(
+        data, mode=mode, colors=color_map, height=plot_height
+    )
+    fig.update_xaxes(title_text=x_label or x_col)
+    st.plotly_chart(
+        fig,
+        height=plot_height,
+        width=plot_width if plot_width is not None else "stretch",
     )
 
-    # 7. Styling (Must happen BEFORE adding Scatter trace)
-    fig.update_traces(textposition="inside", insidetextanchor="middle")
 
-    # Assuming apply_font is available globally
-    try:
-        fig = apply_font(fig)
-    except NameError:
-        pass  # Skip if function not found
+def build_distribution_figure(
+    data: ChartData,
+    *,
+    mode: Literal["absolute", "relative", "log"] = "absolute",
+    kind: Literal["bar", "line"] = "bar",
+    title: str = "",
+    colors: Mapping[str, str] | None = None,
+    height: int = 400,
+) -> go.Figure:
+    """Build a distribution figure without constructing any UI controls.
 
-    # 8. Add Totals on Top (Scatter Trace)
-    fig.add_trace(
-        go.Scatter(
-            x=column_totals[x_col],
-            y=y_text_pos,
-            text=text_content,
-            mode="text",
-            textposition="top center",
-            textfont=dict(size=12, color="black", weight="bold"),
-            showlegend=False,
-            hoverinfo="skip",
+    Args:
+        data: Pure counted memberships and explicit per-stack denominators.
+        mode: Absolute counts, relative fractions, or logarithmic count axis.
+        kind: Stacked bars or lines sharing the same counted data.
+        title: Optional figure title.
+        colors: Optional segment-to-color mapping.
+        height: Figure height in pixels.
+
+    Returns:
+        A fresh figure whose totals and metadata retain the declared cohort.
+    """
+    if mode not in ("absolute", "relative", "log") or kind not in ("bar", "line"):
+        raise ValueError("invalid_distribution_mode")
+    fig = go.Figure()
+    for group in data.group_order:
+        rows = (
+            data.table.loc[data.table["group"] == group]
+            .set_index("x")
+            .reindex(data.x_order)
         )
+        counts = rows["count"].fillna(0).tolist()
+        percentages = rows["percent"].fillna(0).tolist()
+        y = [value / 100 for value in percentages] if mode == "relative" else counts
+        labels = [
+            f"{count}<br>({percent / 100:.0%})"
+            for count, percent in zip(counts, percentages, strict=True)
+        ]
+        color = colors.get(group) if colors else None
+        if kind == "bar":
+            fig.add_trace(
+                go.Bar(x=data.x_order, y=y, name=group, text=labels, marker_color=color)
+            )
+        else:
+            fig.add_trace(
+                go.Scatter(
+                    x=data.x_order,
+                    y=y,
+                    name=group,
+                    mode="lines+markers",
+                    text=labels,
+                    line_color=color,
+                )
+            )
+    fig = apply_font(fig)
+    totals = [data.totals[value] for value in data.x_order]
+    if data.x_order:
+        fig.add_trace(
+            go.Scatter(
+                x=data.x_order,
+                y=(
+                    [1 if total else 0 for total in totals]
+                    if mode == "relative"
+                    else totals
+                ),
+                text=[f"Total: {total}" for total in totals],
+                mode="text",
+                name="_totals",
+                textposition="top center",
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+    fig.update_layout(
+        title=title,
+        height=height,
+        barmode="stack",
+        legend_title_text="",
+        meta={"cohort": data.cohort, "totals": dict(data.totals)},
     )
-
-    # 9. Final Layout
-    fig.update_xaxes(title_text=x_label if x_label else x_col)
-    if mode == MODE_LOG:
-        # A log axis cannot start at 0, so the [0, y_max] range must not be set.
-        fig.update_yaxes(title_text=y_title, tickformat=y_format, type="log")
+    fig.update_xaxes(type="category", categoryorder="array", categoryarray=data.x_order)
+    if mode == "log":
+        fig.update_yaxes(type="log", title_text="Anzahl Tickets")
         fig.add_annotation(
             text="Log-Skala – Balkenanteile sind nicht proportional lesbar",
             xref="paper",
@@ -255,23 +252,26 @@ def create_toggle_chart(
             x=0,
             y=1.06,
             showarrow=False,
-            font=dict(size=12, color="#B00020"),
         )
     else:
-        fig.update_yaxes(title_text=y_title, tickformat=y_format, range=[0, y_max])
-    # Plotly titles the legend with the color column's name; the swatches are
-    # self-explanatory, so drop it.
-    fig.update_layout(legend_title_text="")
+        fig.update_yaxes(
+            title_text=(
+                "Prozentualer Anteil" if mode == "relative" else "Anzahl Tickets"
+            ),
+            tickformat=".0%" if mode == "relative" else None,
+            range=[0, 1.15 if mode == "relative" else max([1, *totals]) * 1.15],
+        )
+    return fig
 
-    st.plotly_chart(fig, height=plot_height, width=plot_width)
 
-
-def apply_font(fig, base=20):
+def apply_font(fig: go.Figure, base: int = 20) -> go.Figure:
+    """Apply shared figure typography and bar-only text properties safely."""
     fig.update_layout(font=dict(size=base))
     fig.update_xaxes(title_font=dict(size=base), tickfont=dict(size=base - 2))
     fig.update_yaxes(title_font=dict(size=base), tickfont=dict(size=base - 2))
 
     fig.update_traces(
+        selector={"type": "bar"},
         textfont_size=base - 2,
         textposition="inside",
         insidetextanchor="middle",
@@ -290,10 +290,11 @@ def apply_font(fig, base=20):
     return fig
 
 
-def apply_filters(df):
+def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
+    """Filter status and assignee through the legacy sidebar adapter."""
     with st.sidebar:
-        status = st.multiselect("Status", df.status.unique())
-        assignee = st.multiselect("Assignee", df.assignee.unique())
+        status: list[str] = st.multiselect("Status", df.status.unique())
+        assignee: list[str] = st.multiselect("Assignee", df.assignee.unique())
 
     if status:
         df = df[df.status.isin(status)]
