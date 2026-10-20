@@ -645,8 +645,28 @@ with tab_customer_tickets:
 # -------------------------------
 with tab_clones:
     st.header("📊 Clone Tickets")
+    known_links = (
+        df["clone_count"].notna()
+        if "clone_count" in df
+        else pd.Series(False, index=df.index)
+    )
+    st.caption(
+        f"{int((~known_links).sum())} Tickets wegen fehlender typisierter "
+        "Beziehungsdaten ausgeschlossen."
+    )
+    clone_frame = df.loc[known_links].copy()
+    projects = []
+    for _, row in clone_frame.iterrows():
+        keys = [*row["clone_inward_keys"], *row["clone_outward_keys"]]
+        projects.append(
+            list(dict.fromkeys(key.rsplit("-", 1)[0] for key in keys)) or ["-"]
+        )
+    clone_frame["clone_in_project"] = pd.Series(
+        projects, index=clone_frame.index, dtype=object
+    )
+    clone_frame = clone_frame.explode("clone_in_project")
     result = (
-        df[["clone_in_project", "key"]]
+        clone_frame[["clone_in_project", "key"]]
         .groupby(["clone_in_project"])
         .count()
         .reset_index()
@@ -659,7 +679,7 @@ with tab_clones:
 
     # plot clones by project per week
     result = (
-        df[["clone_in_project", "key", x_axis]]
+        clone_frame[["clone_in_project", "key", x_axis]]
         .groupby(["clone_in_project", x_axis])
         .count()
         .reset_index()

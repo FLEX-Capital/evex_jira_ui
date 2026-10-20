@@ -1,5 +1,6 @@
 import json
 import os
+from dataclasses import asdict
 from datetime import time
 from functools import lru_cache
 
@@ -11,6 +12,7 @@ from jira import JIRA
 
 import reporting_policy as reporting
 from asset_country import attach_country, load_cache
+from issue_links import clone_links, parse_issue_links
 from jira_loader import WORKSPACE_ID
 from resolution_bands import classify_bands
 
@@ -302,6 +304,10 @@ _ISSUE_COLUMNS = [
     "clone_types",
     "cloned_by",
     "n_clones",
+    "issue_links",
+    "clone_count",
+    "clone_inward_keys",
+    "clone_outward_keys",
     "ansprechpartner",
     "zentrale",
     "filiale",
@@ -383,6 +389,8 @@ def _asset_label(issue, field_name):
 def _extract_issue(issue, comment_separator):
     fields = issue.get("fields") or {}
     links = fields.get("issuelinks") or []
+    normalized = parse_issue_links(links)
+    clones_only = clone_links(normalized)
     if links:
         clones, clone_types, n_clones, clones_of_clones, clone_types_of_clones = (
             load_clones(links)
@@ -429,6 +437,14 @@ def _extract_issue(issue, comment_separator):
         "clone_types": clone_types,
         "cloned_by": cloned_by,
         "n_clones": n_clones,
+        "issue_links": [asdict(link) for link in normalized],
+        "clone_count": len({link.target_key for link in clones_only}),
+        "clone_inward_keys": [
+            link.target_key for link in clones_only if link.direction == "inward"
+        ],
+        "clone_outward_keys": [
+            link.target_key for link in clones_only if link.direction == "outward"
+        ],
         "ansprechpartner": _escalation_cell(fields, "customfield_10689"),
         "zentrale": _escalation_cell(fields, "customfield_10673"),
         "filiale": _escalation_cell(fields, "customfield_10674"),
