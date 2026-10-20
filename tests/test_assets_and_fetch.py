@@ -83,11 +83,13 @@ class AssetsTests(unittest.TestCase):
 class FetchTests(unittest.TestCase):
     def setUp(self):
         self.enterContext(
-            patch.multiple(
-                loader,
-                JIRA_URL="https://jira.example",
-                JIRA_USERNAME="test-user",
-                JIRA_PASSWORD=token_hex(16),
+            patch.dict(
+                "os.environ",
+                {
+                    "JIRA_URL": "https://jira.example",
+                    "JIRA_USERNAME": "test-user",
+                    "JIRA_PASSWORD": token_hex(16),
+                },
             )
         )
 
@@ -166,11 +168,13 @@ class IncrementalFlushTests(unittest.TestCase):
 
     def setUp(self):
         self.enterContext(
-            patch.multiple(
-                loader,
-                JIRA_URL="https://jira.example",
-                JIRA_USERNAME="test-user",
-                JIRA_PASSWORD=token_hex(16),
+            patch.dict(
+                "os.environ",
+                {
+                    "JIRA_URL": "https://jira.example",
+                    "JIRA_USERNAME": "test-user",
+                    "JIRA_PASSWORD": token_hex(16),
+                },
             )
         )
 

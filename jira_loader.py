@@ -1,5 +1,4 @@
 import json
-import os
 import re
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
@@ -8,36 +7,26 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import requests
-from dotenv import load_dotenv
 from jira import JIRA
 
 from service_desks import InvalidIssue, as_utc, effective_start, filter_issue_window
-
-load_dotenv(override=True)
-
-
-JIRA_URL = os.getenv("JIRA_URL")
-JIRA_USERNAME = os.getenv("JIRA_USERNAME")
-JIRA_PASSWORD = os.getenv("JIRA_PASSWORD")
+from settings import JiraConnection, load_settings
 
 CLOUD_ID = "242cf880-c51a-4277-9381-781d5ae181df"
 
 WORKSPACE_ID = "9926cb30-3f07-4fb2-9c83-aa4fc551c721"
 
 
-def _require_credentials():
-    if not all((JIRA_URL, JIRA_USERNAME, JIRA_PASSWORD)):
-        raise RuntimeError(
-            "Jira credentials missing (JIRA_URL, JIRA_USERNAME, JIRA_PASSWORD)."
-        )
+def _require_credentials() -> JiraConnection:
+    return load_settings().require_jira()
 
 
 def jira_request(url, params=None, timeout=30):
     """Helper function to make authenticated requests to the JIRA API."""
-    _require_credentials()
+    connection = _require_credentials()
     response = requests.get(
         url,
-        auth=(JIRA_USERNAME, JIRA_PASSWORD),
+        auth=(connection.username, connection.password),
         headers={"Accept": "application/json"},
         params=params,
         timeout=timeout,
@@ -59,7 +48,7 @@ def fetch_asset_object(
 def fetch_asset_object_uncached(cloud_id, workspace_id, object_id):
     """Read an Assets object without retaining an unlabeled response."""
     url = f"https://api.atlassian.com/ex/jira/{cloud_id}/jsm/assets/workspace/{workspace_id}/v1/object/{object_id}"
-    # url = f"{JIRA_URL.rstrip('/')}/gateway/api/jsm/assets/workspace/{workspace_id}/v1/object/{object_id}"
+    # url = f"{load_settings().require_jira().url}/gateway/api/jsm/assets/workspace/{workspace_id}/v1/object/{object_id}"
     return jira_request(url)
 
 
@@ -75,7 +64,7 @@ def get_workspace_id(workspace_name):
 
 def get_workspaces():
     # https://<Assets Site Name>.atlassian.net/rest/servicedeskapi/assets/workspace
-    url = f"{JIRA_URL.rstrip('/')}/rest/servicedeskapi/assets/workspace"
+    url = f"{load_settings().require_jira().url}/rest/servicedeskapi/assets/workspace"
     # url = f"https://api.atlassian.com/ex/jira/{CLOUD_ID}/jsm/assets/workspace/list"
     return jira_request(url)
 
@@ -310,8 +299,10 @@ def fetch_jira_issues(
         return []
     if max_issues < 1:
         raise ValueError("max_issues must be positive")
-    _require_credentials()
-    jira = JIRA(server=JIRA_URL, basic_auth=(JIRA_USERNAME, JIRA_PASSWORD))
+    connection = _require_credentials()
+    jira = JIRA(
+        server=connection.url, basic_auth=(connection.username, connection.password)
+    )
     # Confirm authentication and project visibility before accepting an empty search.
     account = jira.myself()
     jira.project(project)

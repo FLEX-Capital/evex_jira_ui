@@ -1,6 +1,5 @@
 import importlib
 import json
-import os
 import sys
 import unittest
 from pathlib import Path
@@ -151,7 +150,6 @@ class TransformationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # Replace only the external client boundary; transformation stays real.
-        os.environ.setdefault("JIRA_PASSWORD", "test-token")
         sys.modules.pop("data_transformation", None)
         with patch("jira.JIRA", return_value=MagicMock()):
             cls.transformation = importlib.import_module("data_transformation")

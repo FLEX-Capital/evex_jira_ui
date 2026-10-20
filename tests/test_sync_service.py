@@ -402,7 +402,9 @@ def test_live_fetch_reports_invalid_dates_once(
     client.myself.return_value = {"timeZone": "UTC"}
     client.enhanced_search_issues.return_value = {"issues": [bad, good]}
     monkeypatch.setattr(jira_loader, "JIRA", lambda **kwargs: client)
-    monkeypatch.setattr(jira_loader, "_require_credentials", lambda: None)
+    monkeypatch.setenv("JIRA_URL", "https://jira.example")
+    monkeypatch.setenv("JIRA_USERNAME", "test-user")
+    monkeypatch.setenv("JIRA_PASSWORD", "synthetic-password")
     report = desk_sync.run_sync(request(projects=["SDAX"]))
     assert report.counts == {"SDAX": 1}
     assert report.invalid_rows == {"SDAX": 1}

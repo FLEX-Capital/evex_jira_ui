@@ -252,7 +252,13 @@ def test_verified_empty_raw_field_is_unassigned_in_current_schema():
     assert row.Hauptkategorie == row.Unterkategorie == "Nicht zugeordnet"
 
 
-def test_category_reference_read_pages_selected_fields_without_inventing_absent_issues():
+def test_category_reference_read_pages_selected_fields_without_inventing_absent_issues(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Read paginated fields against explicit synthetic credentials."""
+    monkeypatch.setenv("JIRA_URL", "https://jira.example")
+    monkeypatch.setenv("JIRA_USERNAME", "test-user")
+    monkeypatch.setenv("JIRA_PASSWORD", "synthetic-password")
     import category_sync as categories
     import source_sync
 

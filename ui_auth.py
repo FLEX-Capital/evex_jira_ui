@@ -1,22 +1,18 @@
 """Optional password gate for the Streamlit UI."""
 
 import hmac
-import os
 import secrets
-from pathlib import Path
 
 import streamlit as st
-from dotenv import dotenv_values
 
-# Read directly: the modules that load .env into the environment are imported
-# lazily, after the gate has already run.
-ENV_FILE = Path(__file__).with_name(".env")
+from settings import load_settings
+
 _GENERATION_SECRET = secrets.token_bytes(32)
 
 
 def configured_password() -> str | None:
-    """UI_PASSWORD from .env (it wins, like the Jira credentials) or the environment."""
-    return dotenv_values(ENV_FILE).get("UI_PASSWORD") or os.getenv("UI_PASSWORD")
+    """Return the current injected environment password for generation checks."""
+    return load_settings().ui_password
 
 
 def _password_generation(password: str) -> str:

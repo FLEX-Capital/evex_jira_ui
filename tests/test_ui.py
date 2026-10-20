@@ -179,25 +179,6 @@ class AuthenticationUITests(unittest.TestCase):
             load.assert_not_called()
             self.assertEqual(len(app.sidebar.text_input), 1)
 
-    def test_password_only_in_env_file_gates_a_fresh_process(self):
-        import tempfile
-        from pathlib import Path
-
-        # Nothing has loaded .env into the environment when the gate first runs.
-        with tempfile.TemporaryDirectory() as tmp:
-            env_file = Path(tmp) / ".env"
-            env_file.write_text("UI_PASSWORD=from-dotenv\n")
-            with (
-                patch("ui_auth.ENV_FILE", env_file),
-                patch("data_loading.load_data", return_value=pd.DataFrame()) as load,
-            ):
-                app = AppTest.from_file("app.py", default_timeout=30).run()
-                self.assertFalse(app.exception)
-                load.assert_not_called()
-                self.assertEqual(len(app.sidebar.text_input), 1)
-                app.sidebar.text_input[0].set_value("from-dotenv").run()
-                self.assertEqual(len(app.sidebar.multiselect), 1)
-
 
 class StaleCountryRefreshUITests(unittest.TestCase):
     def setUp(self):
@@ -246,16 +227,12 @@ class StaleCountryRefreshUITests(unittest.TestCase):
 def test_sidebar_submits_all_desks_despite_company_display_filter(
     tmp_path, monkeypatch
 ):
-    import os
-
     from test_temporary_history_pull import FakeJobs
 
     import data_loading
     import sync_jobs
-    import ui_auth
 
     monkeypatch.setattr(data_loading, "DATA_PATH", str(tmp_path / "cache.pkl"))
-    monkeypatch.setattr(ui_auth, "ENV_FILE", os.devnull)
     monkeypatch.delenv("UI_PASSWORD", raising=False)
     jobs = FakeJobs()
     monkeypatch.setattr(sync_jobs, "JOB", jobs)

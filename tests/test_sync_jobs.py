@@ -151,6 +151,9 @@ def test_cli_and_both_ui_controls_produce_identical_schema_after_category_retry(
     monkeypatch.setattr(
         sync_checkpoints, "fetch_jira_issues", jira_loader.fetch_jira_issues
     )
+    monkeypatch.setenv("JIRA_URL", "https://jira.example")
+    monkeypatch.setenv("JIRA_USERNAME", "test-user")
+    monkeypatch.setenv("JIRA_PASSWORD", "synthetic-password")
     actual_resolver = category_sync.CategoryResolver
     frames = []
     for adapter in ("sidebar", "custom", "cli"):

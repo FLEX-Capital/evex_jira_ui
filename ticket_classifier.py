@@ -41,28 +41,22 @@ import pandas as pd
 from openai import AzureOpenAI
 from pydantic import BaseModel, Field
 
+import settings
+from settings import load_settings
+
 CACHE_PATH = "data/sdax_classifications.parquet"
 
 # 2024-10-21 is the oldest GA api-version with structured outputs. Override via
-# .env if your resource is pinned to a newer one.
-DEFAULT_API_VERSION = "2024-10-21"
+# environment if your resource is pinned to a newer one.
+DEFAULT_API_VERSION = settings.DEFAULT_API_VERSION
+
 
 MAX_COMPLETION_TOKENS = 4000
 
 
-def resolve_deployment():
-    """The Azure deployment name, read at call time rather than import time.
-
-    Reading it at import time meant importing this module before load_dotenv()
-    silently produced an empty deployment and a wall of 404s. Both spellings are
-    accepted: the Azure portal and docs use them interchangeably, and this
-    project's .env sets _NAME.
-    """
-    return (
-        os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
-        or os.getenv("AZURE_OPENAI_DEPLOYMENT")
-        or ""
-    )
+def resolve_deployment() -> str:
+    """Return the deployment alias resolved from the current environment."""
+    return load_settings().azure_deployment or ""
 
 
 RESOLUTION_BUCKETS = (
@@ -183,31 +177,13 @@ Judge the request itself, independently of resolution_bucket.
 """
 
 
-def build_client():
-    """Construct the Azure client, failing loudly on missing configuration.
-
-    A missing endpoint or deployment otherwise surfaces once per ticket as
-    thousands of identical 404s, which is slow and hides the real cause.
-    """
-    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-    api_key = os.getenv("AZURE_OPENAI_API_KEY")
-    missing = [
-        name
-        for name, value in (
-            ("AZURE_OPENAI_ENDPOINT", endpoint),
-            ("AZURE_OPENAI_API_KEY", api_key),
-            ("AZURE_OPENAI_DEPLOYMENT_NAME", resolve_deployment()),
-        )
-        if not value
-    ]
-    if missing:
-        raise RuntimeError(
-            f"Azure OpenAI not configured - missing: {', '.join(missing)}"
-        )
+def build_client(deployment: str | None = None) -> AzureOpenAI:
+    """Construct the requested deployment client from one settings snapshot."""
+    connection = load_settings().require_classifier(deployment)
     return AzureOpenAI(
-        api_key=api_key,
-        azure_endpoint=endpoint,
-        api_version=os.getenv("AZURE_OPENAI_API_VERSION", DEFAULT_API_VERSION),
+        api_key=connection.api_key,
+        azure_endpoint=connection.endpoint,
+        api_version=connection.api_version,
         max_retries=5,
     )
 
@@ -408,7 +384,7 @@ def classify_tickets(
     )
 
     if client is None:
-        client = build_client()
+        client = build_client(model)
     results = []
     lock = threading.Lock()
     bar = None

@@ -1,11 +1,10 @@
 """Refresh missing ticket origins without restricting ticket creation dates."""
 
-import os
 import re
-from pathlib import Path
 
 import requests
-from dotenv import load_dotenv
+
+from settings import load_settings
 
 
 def fetch_issue_fields(keys, fields):
@@ -16,16 +15,12 @@ def fetch_issue_fields(keys, fields):
     if any(not re.fullmatch(r"[A-Z][A-Z0-9_]*-\d+", key) for key in keys):
         raise ValueError("Invalid Jira ticket key in the cache.")
 
-    load_dotenv(Path(__file__).with_name(".env"), override=True)
-    base = (os.getenv("JIRA_URL") or "").rstrip("/")
-    username = os.getenv("JIRA_USERNAME")
-    password = os.getenv("JIRA_PASSWORD")
-    if not all((base, username, password)):
-        raise RuntimeError("Jira-Zugangsdaten fehlen in der Konfiguration.")
+    connection = load_settings().require_jira()
+    base = connection.url
 
     results = {}
     with requests.Session() as session:
-        session.auth = (username, password)
+        session.auth = (connection.username, connection.password)
         for offset in range(0, len(keys), 100):
             batch = keys[offset : offset + 100]
             payload = {

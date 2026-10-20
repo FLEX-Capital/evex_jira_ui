@@ -1,13 +1,10 @@
 import json
-import os
 from dataclasses import asdict
 from datetime import time
-from functools import lru_cache
 
 import holidays
 import numpy as np
 import pandas as pd
-from dotenv import load_dotenv
 from jira import JIRA
 
 import reporting_policy as reporting
@@ -15,22 +12,15 @@ from asset_country import attach_country, load_cache
 from issue_links import clone_links, parse_issue_links
 from jira_loader import WORKSPACE_ID
 from resolution_bands import classify_bands
-
-load_dotenv(override=True)
-
-JIRA_URL = os.getenv("JIRA_URL")
-JIRA_USERNAME = os.getenv("JIRA_USERNAME")
-JIRA_PASSWORD = os.getenv("JIRA_PASSWORD")
+from settings import load_settings
 
 
-@lru_cache(maxsize=1)
-def get_jira():
-    """Create the Jira client only when clone traversal actually needs it."""
-    if not (JIRA_PASSWORD or "").strip():
-        raise RuntimeError(
-            "JIRA_PASSWORD is not set. Add it to .env before accessing Jira."
-        )
-    return JIRA(server=JIRA_URL, basic_auth=(JIRA_USERNAME, JIRA_PASSWORD))
+def get_jira() -> JIRA:
+    """Create a Jira client from the current requested-operation settings."""
+    connection = load_settings().require_jira()
+    return JIRA(
+        server=connection.url, basic_auth=(connection.username, connection.password)
+    )
 
 
 # read json from data/jira-servicedesk-schema-objects.json
