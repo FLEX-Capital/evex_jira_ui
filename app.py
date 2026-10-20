@@ -6,16 +6,11 @@ import plotly.graph_objects as go  # Required for adding the custom text layer
 import streamlit as st
 from st_aggrid import AgGrid, GridOptionsBuilder
 
-from asset_country import (
-    NOT_RESOLVED,
-    attach_country,
-)
+from asset_country import NOT_RESOLVED, attach_country
 from asset_country import load_cache as load_country_cache
 from asset_country import refresh_countries, save_cache
-from data_loading import (
-    CacheChangedError,
-    cache_lock,
-)
+from cache_schema import CacheReadError, CacheSchemaError
+from data_loading import CacheChangedError, cache_lock
 from data_loading import cache_revision as current_cache_revision
 from data_loading import load_data_snapshot, save_data_if_unchanged
 from data_transformation import enrich_jira_time_metrics
@@ -35,7 +30,7 @@ from service_desks import (
     berlin_day_start,
     filter_companies,
 )
-from settings import load_settings
+from settings import SettingsError, load_settings
 from source_sync import refresh_missing_sources
 from styles import CUSTOM_CSS
 from sync_jobs import render_sidebar_refresh
@@ -65,14 +60,14 @@ selected_companies = st.sidebar.multiselect(
 cache_revision = None
 try:
     df_old, cache_revision = load_data_snapshot(path=paths.tickets)
-    df = df_old.copy()
-    # make sure column clone_in_project is there
-    if "clone_in_project" not in df.columns:
-        df["clone_in_project"] = "-"
-except Exception:  # noqa: BLE001 - allow an unavailable legacy cache
-    df = pd.DataFrame()
-    df_old = pd.DataFrame()
-    cache_revision = current_cache_revision(paths.tickets)
+except (CacheReadError, CacheSchemaError, SettingsError, OSError):
+    st.error(
+        "Cache konnte nicht geladen werden. Bitte Schema, Datenverzeichnis und Tenant prüfen "
+        "oder eine passende Sicherung wiederherstellen."
+    )
+    st.stop()
+df_old = df_old if df_old is not None else pd.DataFrame()
+df = df_old.copy()
 
 st.session_state["_sync_seen_revision"] = cache_revision
 

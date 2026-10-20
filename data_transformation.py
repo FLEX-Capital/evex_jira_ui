@@ -617,22 +617,34 @@ def _normalize_bool_columns(df):
 
 
 def upsert_jira_data(df_old, df_new, key_col="key"):
+    from cache_schema import SCHEMA_ATTR, normalize_frame
+
+    for source in (df_old, df_new):
+        if SCHEMA_ATTR in source.attrs:
+            normalize_frame(source)
+
+    def finalize(frame: pd.DataFrame) -> pd.DataFrame:
+        frame = _normalize_bool_columns(frame)
+        frame.attrs = {**df_new.attrs, **df_old.attrs}
+        frame.attrs.pop(SCHEMA_ATTR, None)
+        return normalize_frame(frame) if key_col == "key" else frame
+
     old = df_old.copy()
     new = df_new.copy()
 
     if key_col not in new.columns:
         if new.empty:
-            return _normalize_bool_columns(old)
+            return finalize(old)
         raise KeyError(f"Missing key column '{key_col}' in refreshed Jira data")
     new = new.loc[new[key_col].notna()].drop_duplicates(key_col, keep="last")
 
     if old.empty and key_col not in old.columns:
-        return _normalize_bool_columns(new.reset_index(drop=True))
+        return finalize(new.reset_index(drop=True))
     if key_col not in old.columns:
         raise KeyError(f"Missing key column '{key_col}' in cached Jira data")
     old = old.loc[old[key_col].notna()].drop_duplicates(key_col, keep="last")
     if new.empty:
-        return _normalize_bool_columns(old.reset_index(drop=True))
+        return finalize(old.reset_index(drop=True))
 
     old = old.set_index(key_col)
     new = new.set_index(key_col)
@@ -647,4 +659,4 @@ def upsert_jira_data(df_old, df_new, key_col="key"):
             old.loc[shared_keys, column] = new.loc[shared_keys, column]
     inserted = new.loc[new.index.difference(old.index)]
     combined = pd.concat([old, inserted], axis=0).reset_index()
-    return _normalize_bool_columns(combined)
+    return finalize(combined)

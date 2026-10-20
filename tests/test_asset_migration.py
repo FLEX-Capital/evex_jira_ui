@@ -53,7 +53,9 @@ class AssetMigrationTests(unittest.TestCase):
                 patch("sys.argv", ["asset_migration.py"]),
             ):
                 asset_migration.main()
-            pd.testing.assert_frame_equal(pd.read_pickle(path), repaired)
+            saved = pd.read_pickle(path)
+            pd.testing.assert_frame_equal(saved[repaired.columns], repaired)
+            self.assertEqual(saved.attrs["evex_ticket_schema_version"], 2)
             backups = list(Path(tmp).glob("*.bak-*"))
             self.assertEqual(len(backups), 1)
             self.assertEqual(backups[0].read_bytes(), original)

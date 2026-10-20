@@ -368,7 +368,8 @@ class TransformationTests(unittest.TestCase):
         self.assertEqual(result.loc["A-1", "summary"], "new")
         self.assertTrue(pd.isna(result.loc["A-1", "priority"]))
         self.assertEqual(result.loc["A-1", "local_note"], "keep")
-        self.assertEqual(result["is_done"].dtype, bool)
+        self.assertEqual(str(result["is_done"].dtype), "boolean")
+        self.assertTrue(result["is_done"].isna().all())
         self.assertEqual(set(bootstrapped["key"]), {"A-1", "A-2"})
         self.assertTrue(bootstrapped["key"].is_unique)
 

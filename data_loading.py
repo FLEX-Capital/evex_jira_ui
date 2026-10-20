@@ -5,6 +5,9 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pandas as pd
+
+from cache_schema import CacheReadError, normalize_frame
 from file_io import Revision, atomic_write, path_lock
 from settings import DEFAULT_TENANT, TENANT_ATTR, Settings, SettingsError, load_settings
 
@@ -124,7 +127,7 @@ def save_data(df, *, path=None, settings=None):
 
 def _save_data_unlocked(df, *, path=None, settings=None):
     config = settings or load_settings()
-    df = drop_obsolete_columns(df).copy()
+    df = normalize_frame(drop_obsolete_columns(df))
     identity = config.tenant.as_dict()
     if TENANT_ATTR in df.attrs and df.attrs[TENANT_ATTR] != identity:
         raise SettingsError("tenant_mismatch", ("JIRA_CLOUD_ID", "JIRA_WORKSPACE_ID"))
@@ -137,12 +140,16 @@ def load_data(*, path=None, settings=None):
     config = settings or load_settings()
     path = _ticket_path(path, settings=config)
     if path.exists():
-        with path.open("rb") as f:
-            # bandit B301: DATA_PATH is written by save_data() on this machine,
-            # so it is not untrusted input. If the cache ever becomes something
-            # a third party can supply, switch to a non-executable format
-            # (e.g. parquet) instead of suppressing this.
-            frame = drop_obsolete_columns(pickle.load(f))  # nosec B301
+        try:
+            with path.open("rb") as f:
+                # Trusted local pickle only. Schema validation cannot make
+                # arbitrary third-party pickle input safe to deserialize.
+                frame = pickle.load(f)  # nosec B301
+        except Exception:
+            raise CacheReadError("cache_read_failed") from None
+        if not isinstance(frame, pd.DataFrame):
+            raise CacheReadError("cache_not_dataframe")
+        frame = normalize_frame(drop_obsolete_columns(frame))
         identity = frame.attrs.get(TENANT_ATTR)
         if identity is None:
             if config.tenant != DEFAULT_TENANT:
