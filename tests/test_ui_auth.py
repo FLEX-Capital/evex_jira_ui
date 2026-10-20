@@ -1,10 +1,12 @@
 """Require the current password generation before reading cached tickets."""
 
+from datetime import date
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 import pandas as pd
 import pytest
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 import data_loading
@@ -138,3 +140,57 @@ def test_authenticated_rerun_reuses_generation(auth_app: AuthApp) -> None:
     assert load.called
     assert app.session_state["_ui_auth_generation"] == generation
     assert not app.session_state.filtered_state.get("_ui_password_input")
+
+
+@pytest.mark.parametrize("panel", ["status", "history"])
+@pytest.mark.parametrize("action", ["timer", "resume", "start"])
+def test_fragment_rotation_blocks_status_and_import_actions(
+    storage: Path, monkeypatch: pytest.MonkeyPatch, panel: str, action: str
+) -> None:
+    """An independent fragment must return to the app gate before any job access."""
+    import sync_jobs
+    import temporary_history_pull as history
+
+    class FullAppRerun(BaseException):
+        pass
+
+    state = {
+        "_ui_authed": True,
+        "_ui_auth_generation": ui_auth._password_generation("password-A"),
+    }
+    monkeypatch.setattr(st, "session_state", state)
+    monkeypatch.setattr(ui_auth, "configured_password", lambda: "password-B")
+    jobs = Mock()
+    jobs.snapshot.return_value = {
+        "state": "partial",
+        "request": {"projects": ["SDAX"]},
+    }
+    monkeypatch.setattr(sync_jobs, "JOB", jobs)
+    rerun = Mock(side_effect=FullAppRerun)
+    monkeypatch.setattr(st, "rerun", rerun)
+    monkeypatch.setattr(st, "container", MagicMock())
+    for name in ("caption", "subheader", "info", "warning"):
+        monkeypatch.setattr(st, name, Mock())
+    monkeypatch.setattr(
+        st, "date_input", Mock(return_value=(date(2025, 1, 1), date(2025, 2, 1)))
+    )
+    monkeypatch.setattr(st, "multiselect", Mock(return_value=["SDAX"]))
+    monkeypatch.setattr(
+        st,
+        "button",
+        lambda label, **kwargs: (action == "resume" and "fortsetzen" in label)
+        or (action == "start" and "laden" in label),
+    )
+    # Call the actual fragment body, deliberately bypassing app.py's full gate.
+    # AppTest.run() itself only simulates whole-app reruns.
+    with pytest.raises(FullAppRerun):
+        if panel == "status":
+            sync_jobs.render_sync_status.__wrapped__("isolated")
+        else:
+            history.render_history_pull.__wrapped__()
+    jobs.snapshot.assert_not_called()
+    jobs.resume.assert_not_called()
+    jobs.start.assert_not_called()
+    rerun.assert_called_once_with(scope="app")
+    assert not state.get("_ui_authed")
+    assert not state.get("_ui_auth_generation")

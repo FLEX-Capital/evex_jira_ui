@@ -132,7 +132,7 @@ desk_sync.run_sync(desk_sync.make_sync_request(datetime(2026,9,1,tzinfo=UTC),dat
 
 
 def test_cli_and_both_ui_controls_produce_identical_schema_after_category_retry(
-    storage, monkeypatch
+    storage, monkeypatch, public_ui
 ):
     from unittest.mock import Mock
 

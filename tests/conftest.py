@@ -4,6 +4,14 @@ import pytest
 import requests
 
 
+@pytest.fixture
+def public_ui(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep isolated UI component tests independent of a developer's password."""
+    import ui_auth
+
+    monkeypatch.setattr(ui_auth, "configured_password", lambda: None)
+
+
 @pytest.fixture(autouse=True)
 def forbid_unmocked_network(monkeypatch):
     def forbidden(*args, **kwargs):

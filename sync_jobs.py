@@ -11,6 +11,7 @@ import streamlit as st
 import data_loading
 from desk_sync import make_sync_request, run_sync, status_path
 from service_desks import BY_KEY
+from ui_auth import require_current_session
 
 
 def _status_revision(data_path):
@@ -214,6 +215,7 @@ def render_sync_feedback(location):
 
 @st.fragment(run_every=5)
 def render_sync_status(location):
+    require_current_session()
     render_sync_feedback(location)
 
 

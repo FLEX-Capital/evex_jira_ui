@@ -45,6 +45,27 @@ def _authenticate_entered_password() -> None:
             st.session_state["_ui_auth_error"] = True
 
 
+def _has_current_generation(password: str) -> bool:
+    generation = st.session_state.get("_ui_auth_generation")
+    return (
+        st.session_state.get("_ui_authed") is True
+        and isinstance(generation, str)
+        and hmac.compare_digest(
+            generation.encode("utf-8"), _password_generation(password).encode("ascii")
+        )
+    )
+
+
+def require_current_session() -> None:
+    """Return expired fragment sessions to the full app's login gate."""
+    password = configured_password()
+    if not password:
+        _clear_auth_state()
+    elif not _has_current_generation(password):
+        _clear_auth_state()
+        st.rerun(scope="app")
+
+
 def require_password() -> None:
     """Require the current password generation before rendering private UI.
 
@@ -58,13 +79,7 @@ def require_password() -> None:
         return
 
     generation = st.session_state.get("_ui_auth_generation")
-    if (
-        st.session_state.get("_ui_authed") is True
-        and isinstance(generation, str)
-        and hmac.compare_digest(
-            generation.encode("utf-8"), _password_generation(password).encode("ascii")
-        )
-    ):
+    if _has_current_generation(password):
         st.sidebar.button("🔒 Logout", on_click=_clear_auth_state)
         return
     if st.session_state.get("_ui_authed") or generation is not None:

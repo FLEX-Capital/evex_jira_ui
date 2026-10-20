@@ -31,7 +31,7 @@ class FakeJobs:
 
 
 @pytest.fixture
-def ui(tmp_path, monkeypatch):
+def ui(tmp_path, monkeypatch, public_ui):
     import temporary_history_pull as history
 
     monkeypatch.setattr(data_loading, "DATA_PATH", str(tmp_path / "cache.pkl"))

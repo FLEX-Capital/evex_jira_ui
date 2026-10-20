@@ -7,6 +7,7 @@ import streamlit as st
 import sync_jobs
 from desk_sync import make_sync_request
 from service_desks import BERLIN, BY_KEY, EARLIEST_DAY, berlin_day_end, berlin_day_start
+from ui_auth import require_current_session
 
 START = datetime(2025, 1, 1, tzinfo=BERLIN)
 DATES_KEY = "temporary_history_dates"
@@ -30,6 +31,7 @@ def _follow_today(today):
 
 @st.fragment(run_every=5)
 def render_history_pull():
+    require_current_session()
     with st.container():
         st.subheader("Backfill / Datenimport")
         st.caption(
