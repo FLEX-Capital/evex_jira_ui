@@ -170,8 +170,7 @@ def normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
     template = _empty_schema()
     if result.empty:
         for column in template:
-            if column not in result:
-                result[column] = template[column]
+            result[column] = template[column].copy()
     else:
         result = result.reset_index(drop=True)
         times = pd.to_datetime(
@@ -199,9 +198,17 @@ def normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
         for column in ("Land", "land_quelle"):
             result[column] = result[column].fillna(countries[column])
     for column in _BOOLS:
-        result[column] = result[column].astype("boolean")
+        try:
+            result[column] = result[column].astype("boolean")
+        except (TypeError, ValueError, OverflowError):
+            raise CacheSchemaError("invalid_legacy_type", (column,)) from None
     for column in _COUNTS:
-        result[column] = pd.to_numeric(result[column], errors="coerce").astype("Int64")
+        try:
+            result[column] = pd.to_numeric(result[column], errors="coerce").astype(
+                "Int64"
+            )
+        except (TypeError, ValueError, OverflowError):
+            raise CacheSchemaError("invalid_legacy_type", (column,)) from None
     result.attrs = dict(frame.attrs)
     result.attrs[SCHEMA_ATTR] = CURRENT_TICKET_SCHEMA
     _validate(result)

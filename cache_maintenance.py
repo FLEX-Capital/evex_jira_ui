@@ -347,12 +347,23 @@ def apply_cleanup(
                         ) from None
                     deleted.append(candidate.path)
                     expected.pop(candidate.path.name)
-        except (CacheChangedError, ImportBusyError, BlockingIOError):
+        except (CacheChangedError, ImportBusyError, OSError) as exc:
             if deleted:
+                code = (
+                    "cleanup_interrupted"
+                    if isinstance(
+                        exc, (CacheChangedError, ImportBusyError, BlockingIOError)
+                    )
+                    else "cleanup_io_failed"
+                )
                 raise CleanupError(
-                    "cleanup_interrupted",
+                    code,
                     tuple(deleted),
-                    tuple(candidate.path for candidate in selected),
+                    tuple(
+                        candidate.path
+                        for candidate in plan.candidates
+                        if candidate.path not in deleted
+                    ),
                 ) from None
             raise
     return tuple(deleted)
