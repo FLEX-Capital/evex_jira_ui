@@ -2,12 +2,11 @@
 
 import hashlib
 import json
-import os
-import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
+from typing import BinaryIO
 from uuid import uuid4
 
 import pandas as pd
@@ -23,24 +22,10 @@ from category_sync import (
     unknown,
     unresolved_cells,
 )
+from file_io import atomic_write
+from file_io import write_json_atomic as write_json_atomic
 from service_desks import BY_KEY, InvalidIssue
 from settings import DEFAULT_TENANT, TENANT_ATTR, load_settings
-
-
-def write_json_atomic(path, value):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", dir=path.parent, delete=False
-        ) as handle:
-            temporary = handle.name
-            json.dump(value, handle)
-        os.replace(temporary, path)
-    finally:
-        if temporary and os.path.exists(temporary):
-            os.unlink(temporary)
 
 
 def merge_import(current, incoming, baseline):
@@ -243,50 +228,45 @@ def _remaining_asset_failure(errors, resolver):
 
 def publish_raw_snapshot(checkpoint_dir, projects, target, *, run_id, request):
     """Publish one project at a time; the raw array is diagnostic, not the cache."""
-    directory = Path(target).parent
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", dir=directory, delete=False
-        ) as handle:
-            temporary = handle.name
-            handle.write("[")
-            first = True
-            count = 0
-            for project in projects:
-                with (
-                    Path(checkpoint_dir) / f"backfill_{project}.json"
-                ).open() as source:
-                    issues = json.load(source)["issues"]
-                for issue in issues:
-                    if not first:
-                        handle.write(",")
-                    json.dump(issue, handle)
-                    first = False
-                    count += 1
-                del issues
-            handle.write("]")
-        with open(temporary, "rb") as handle:
-            digest = hashlib.file_digest(handle, "sha256").hexdigest()
-        os.replace(temporary, target)
-        # Two replacements cannot be atomic together. A matching digest ties
-        # metadata to this exact array; a metadata failure is reported separately
-        # from the ticket-cache commit and cannot validate an older sidecar.
-        write_json_atomic(
-            Path(target).with_suffix(".meta.json"),
-            {
-                "version": 1,
-                "run_id": run_id,
-                "request": request.to_dict(),
-                "published_at": datetime.now(UTC).isoformat(),
-                "snapshot": Path(target).name,
-                "sha256": digest,
-                "issues": count,
-            },
-        )
-    finally:
-        if temporary and os.path.exists(temporary):
-            os.unlink(temporary)
+    digest = hashlib.sha256()
+    count = 0
+
+    def serialize(handle: BinaryIO) -> None:
+        nonlocal count
+
+        def emit(value: bytes) -> None:
+            handle.write(value)
+            digest.update(value)
+
+        emit(b"[")
+        first = True
+        for project in projects:
+            with (Path(checkpoint_dir) / f"backfill_{project}.json").open() as source:
+                issues = json.load(source)["issues"]
+            for issue in issues:
+                if not first:
+                    emit(b",")
+                emit(json.dumps(issue).encode("utf-8"))
+                first = False
+                count += 1
+            del issues
+        emit(b"]")
+
+    atomic_write(Path(target), serialize)
+    # A matching digest ties metadata to this exact array; two replacements
+    # cannot be atomic together, so a sidecar failure never validates old data.
+    write_json_atomic(
+        Path(target).with_suffix(".meta.json"),
+        {
+            "version": 1,
+            "run_id": run_id,
+            "request": request.to_dict(),
+            "published_at": datetime.now(UTC).isoformat(),
+            "snapshot": Path(target).name,
+            "sha256": digest.hexdigest(),
+            "issues": count,
+        },
+    )
 
 
 def run_sync(request, *, progress=None, data_path=None):

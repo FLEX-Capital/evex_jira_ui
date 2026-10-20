@@ -12,7 +12,6 @@ Usage:
 import argparse
 import os
 import shutil
-import tempfile
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
@@ -36,6 +35,7 @@ from data_loading import (
     load_data,
     save_data,
 )
+from file_io import atomic_write
 from jira_country_export import resolve_asset_country_strict
 from resolution_bands import classify_bands
 from settings import load_settings
@@ -93,17 +93,7 @@ def write_pickle_atomically(df, path, *, settings=None):
         save_data(df, path=path, settings=config)
         return
 
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    handle, temporary = tempfile.mkstemp(dir=target.parent, suffix=".tmp")
-    os.close(handle)
-    try:
-        df.to_pickle(temporary)
-        os.replace(temporary, target)
-    except BaseException:
-        if os.path.exists(temporary):
-            os.remove(temporary)
-        raise
+    atomic_write(Path(path), df.to_pickle)
 
 
 def main():

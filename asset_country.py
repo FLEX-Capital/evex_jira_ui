@@ -9,11 +9,11 @@ script resolves ids.
 import json
 import math
 import os
-import tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 
+from file_io import write_json_atomic
 from settings import DEFAULT_TENANT, SettingsError, load_settings
 
 CACHE_PATH = "data/asset_country.json"
@@ -95,17 +95,7 @@ def save_cache(cache, path=None, *, baseline=None, settings=None):
 
 
 def _write_cache(cache, path):
-    directory = os.path.dirname(path) or "."
-    os.makedirs(directory, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=directory, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(cache, handle, ensure_ascii=False, indent=2, sort_keys=True)
-        os.replace(tmp, path)
-    except BaseException:
-        if os.path.exists(tmp):
-            os.remove(tmp)
-        raise
+    write_json_atomic(path, cache)
 
 
 def resolve_missing(object_ids, cache, resolver=None, workers=4):

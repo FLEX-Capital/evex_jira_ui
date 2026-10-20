@@ -1,18 +1,14 @@
 import fcntl
-import os
 import pickle  # nosec B403
 import shutil
-import tempfile
-import threading
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from file_io import Revision, atomic_write, path_lock
 from settings import DEFAULT_TENANT, TENANT_ATTR, Settings, SettingsError, load_settings
 
 DATA_PATH = "data/jira_data.pkl"
-_mutex = threading.RLock()
-_lock_state = threading.local()
 
 
 def _ticket_path(
@@ -57,24 +53,11 @@ def cache_lock(path=None):
     Lock a stable sidecar, not the pickle inode replaced by atomic saves. The
     thread lock plus nesting check makes save_data safe inside a transaction.
     """
-    path = _ticket_path(path)
-    with _mutex:
-        previous = getattr(_lock_state, "path", None)
-        if previous == path:
-            yield
-            return
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with Path(f"{path}.lock").open("a+b") as handle:
-            fcntl.flock(handle, fcntl.LOCK_EX)
-            _lock_state.path = path
-            try:
-                yield
-            finally:
-                _lock_state.path = previous
-                fcntl.flock(handle, fcntl.LOCK_UN)
+    with path_lock(_ticket_path(path)):
+        yield
 
 
-def cache_revision(path=None):
+def cache_revision(path=None) -> Revision | None:
     try:
         stat = _ticket_path(path).stat()
     except FileNotFoundError:
@@ -147,16 +130,7 @@ def _save_data_unlocked(df, *, path=None, settings=None):
         raise SettingsError("tenant_mismatch", ("JIRA_CLOUD_ID", "JIRA_WORKSPACE_ID"))
     df.attrs[TENANT_ATTR] = identity
     path = _ticket_path(path, settings=config)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as f:
-            temporary = f.name
-            pickle.dump(df, f)
-        os.replace(temporary, path)
-    finally:
-        if temporary and os.path.exists(temporary):
-            os.unlink(temporary)
+    atomic_write(path, lambda handle: pickle.dump(df, handle))
 
 
 def load_data(*, path=None, settings=None):

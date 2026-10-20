@@ -7,12 +7,8 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from desk_sync import write_json_atomic
-from jira_loader import (
-    dedupe_issues,
-    enrich_issue_assets,
-    fetch_jira_issues,
-)
+from file_io import write_json_atomic
+from jira_loader import dedupe_issues, enrich_issue_assets, fetch_jira_issues
 from service_desks import InvalidIssue, as_utc, effective_start, filter_issue_window
 from settings import DEFAULT_TENANT, Settings, load_settings
 
