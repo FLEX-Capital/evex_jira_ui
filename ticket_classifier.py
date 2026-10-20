@@ -32,7 +32,6 @@ a json_schema and every ticket will come back as a bad_request error.
 """
 
 import hashlib
-import os
 import threading
 from collections.abc import Mapping, Sized
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -317,47 +316,30 @@ def validate_ticket_input(
     return key.strip(), _render_ticket_text(fields, max_chars)
 
 
-def load_cache(cache_path=None):
-    """Return the cached classifications, or an empty frame with the schema."""
-    columns = [
-        "key",
-        "text_hash",
-        "resolution_bucket",
-        "sub_bucket",
-        "intent_label",
-        "ai_mode",
-        "confidence",
-        "reasoning",
-        "model",
-        "input_tokens",
-        "output_tokens",
-        "reasoning_tokens",
-        "error",
-    ]
-    cache_path = (
+def load_cache(cache_path: str | Path | None = None) -> pd.DataFrame:
+    """Read full versioned classification history; selection belongs to the caller."""
+    from classification_cache import load_classifications
+
+    path = (
         load_settings().paths.classifications
         if cache_path is None
         else Path(cache_path)
     )
-    if os.path.exists(cache_path):
-        cached = pd.read_parquet(cache_path)
-        for column in columns:
-            if column not in cached.columns:
-                cached[column] = pd.NA
-        return cached[columns]
-    return pd.DataFrame(columns=columns)
+    return load_classifications(path)
 
 
-def save_cache(frame, cache_path=None):
-    from file_io import atomic_write, path_lock
+def save_cache(
+    frame: pd.DataFrame, cache_path: str | Path | None = None
+) -> pd.DataFrame:
+    """Merge prepared results with the latest disk identities under its own transaction."""
+    from classification_cache import merge_classifications
 
-    cache_path = (
+    path = (
         load_settings().paths.classifications
         if cache_path is None
         else Path(cache_path)
     )
-    with path_lock(cache_path):
-        atomic_write(cache_path, lambda handle: frame.to_parquet(handle, index=False))
+    return merge_classifications(path, frame)
 
 
 class ClassificationOutputError(ValueError):
