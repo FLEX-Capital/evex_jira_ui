@@ -15,10 +15,10 @@ Notes discovered from the live data:
 
 Usage:
   # Default: use the already-pulled tickets in data/jira_issues.json
-  uv run python jira_country_export.py
+  uv run --env-file .env python jira_country_export.py
 
   # Re-pull all tickets from Jira first (slower), then export
-  uv run python jira_country_export.py --refetch \
+  uv run --env-file .env python jira_country_export.py --refetch \
       --project SDAX --start 2020-01-01 --end 2026-12-31
 """
 

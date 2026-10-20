@@ -5,8 +5,8 @@ Repository tooling is based on
 v0.1.7. Copier answers are saved in `.copier-answers.yml`; update with
 `copier update --trust --skip-tasks` and review the merge. The template is adapted
 to this application's flat module layout and Python 3.12 Docker runtime.
-Install development tools with `uv sync --frozen`, run tests and coverage with
-`uv run --frozen pytest`, and install Git hooks with `trunk git-hooks sync`.
+Install analysis and development tools with `uv sync --frozen --group analysis --group dev`,
+run tests and coverage with `uv run --frozen --no-sync pytest`, and install Git hooks with `trunk git-hooks sync`.
 
 Streamlit analytics for the service desks on `amparex.atlassian.net`:
 
@@ -23,25 +23,45 @@ window; it reports each desk separately and retains cached tickets if a desk fai
 
 ## Run locally
 
-Use Python 3.12 or newer and the pinned runtime dependencies:
+Use Python 3.12 and install the locked dashboard environment:
 
 ```sh
-uv venv
-uv pip install -r requirements.runtime.txt
-uv run --no-sync streamlit run app.py
+uv sync --frozen --no-default-groups
+uv run --frozen --no-sync --env-file .env streamlit run app.py
 ```
+
+Omit `--env-file .env` when the server already supplies environment values. For
+notebooks/classification/decks add `--group analysis`; for the complete offline
+suite install `uv sync --frozen --group analysis --group dev` and run
+`uv run --frozen --no-sync pytest`. Analysis tools are optional for the dashboard.
+
+`pyproject.toml` and `uv.lock` author the dependency graph. Generate the hashed
+Docker manifest with `uv run --frozen --no-sync python tools/dependency_export.py`;
+check drift with the same command plus `--check`. Docker installs that generated
+`requirements.runtime.txt` with hash verification. Do not edit its pins directly.
 
 Provide `JIRA_URL=https://amparex.atlassian.net`, `JIRA_USERNAME`, and
 `JIRA_PASSWORD` (the account's API token) through the environment or an untracked
-`.env` file. Cached analysis does not require a live Jira connection. The existing
-code loads `.env` with override enabled. Never commit credentials or ticket caches.
+`.env` file injected by the launcher. Application modules do not read `.env` or
+change process environment values. Cached analysis needs no Jira/model credentials;
+missing credentials are reported only for a requested network operation. Never
+commit credentials or ticket caches.
 
-Set `UI_PASSWORD` in `.env` or the server environment to require a login before
-any ticket data or import controls are shown; the `.env` value wins, like the Jira
-credentials. Without it, the dashboard remains accessible
+Inject `UI_PASSWORD` through the launcher or server environment to require a login
+before ticket data or import controls are shown. The effective process environment
+is the only application configuration source. Password changes revoke the current
+session generation, including fragment actions. Without it, the dashboard remains accessible
 without a password. Docker builds exclude local environment files, ticket caches,
 and backups; provide credentials at runtime and use persistent storage for `data/`.
 Only the logo and legacy category map from `data/` are bundled in the image.
+
+`DATA_DIR` defaults to project-relative `data/`; a relative override is resolved
+against the project directory, regardless of the shell's working directory. Static
+assets stay under project-relative `assets/`. Explicit CLI path flags keep their
+usual working-directory semantics. Jira tenant overrides are `JIRA_CLOUD_ID` and
+`JIRA_WORKSPACE_ID`; their defaults preserve the historical tenant, and another
+tenant cannot reuse an unproven legacy ticket/country cache. Versioned country
+persistence for another tenant is delivered by cleanup phase 4.
 
 ## Euronet import
 
@@ -61,16 +81,16 @@ refreshes and backfills when they fall within that window.
 
 ```sh
 # Initial Euronet import; ends at the time the command runs
-uv run --no-sync python backfill_jira.py --project SDEU --start 2025-01-01
+uv run --frozen --no-sync --env-file .env python backfill_jira.py --project SDEU --start 2025-01-01
 
 # All three desks, past 365 days
-uv run --no-sync python backfill_jira.py
+uv run --frozen --no-sync --env-file .env python backfill_jira.py
 
 # Any project combination and a shorter period
-uv run --no-sync python backfill_jira.py --project SDAX --project SDEU --days 7
+uv run --frozen --no-sync --env-file .env python backfill_jira.py --project SDAX --project SDEU --days 7
 
 # Reuse a matching checkpoint and fetch the remaining time interval
-uv run --no-sync python backfill_jira.py --project SDEU --start 2025-01-01 --resume
+uv run --frozen --no-sync --env-file .env python backfill_jira.py --project SDEU --start 2025-01-01 --resume
 ```
 
 `--start` and `--days` are mutually exclusive. Checkpoints are per project and
@@ -170,7 +190,7 @@ inputs, not for any normal-workspace fetch.
 To refresh category labels already stored in the local cache:
 
 ```sh
-uv run --no-sync python asset_migration.py
+uv run --frozen --no-sync --env-file .env python asset_migration.py
 ```
 
 This resolves the distinct category IDs originally copied from production issue
@@ -210,12 +230,12 @@ The Länder tab reports how many tickets are in that state.
 
 ```sh
 # Resolve every asset the cache does not know yet, then write Land back
-uv run --no-sync python backfill_country.py --dry-run
-uv run --no-sync python backfill_country.py
+uv run --frozen --no-sync --env-file .env python backfill_country.py --dry-run
+uv run --frozen --no-sync --env-file .env python backfill_country.py
 
 # Re-resolve ids cached as null by older versions, which stored a failed
 # lookup the same way as "this asset has no Land" and never retried it
-uv run --no-sync python backfill_country.py --retry-unknown
+uv run --frozen --no-sync --env-file .env python backfill_country.py --retry-unknown
 ```
 
 Writing over the input takes a `data/jira_data.pkl.bak-*` backup first.
@@ -244,7 +264,7 @@ later import replaces the shared status. The digest must match the raw file
 before using that metadata: publication errors can leave an older sidecar.
 
 ```sh
-uv run --no-sync python -m pytest -q
+uv run --frozen --no-sync --env-file .env python -m pytest -q
 ```
 
 Tests cover company subsets and Streamlit rendering, import timezone boundaries,

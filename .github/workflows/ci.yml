@@ -25,10 +25,21 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --group analysis --group dev
+
+      - name: Check dependency lock and runtime export
+        run: |
+          uv lock --check
+          uv run --frozen --no-sync python tools/dependency_export.py --check
+
+      - name: Check clean runtime
+        run: >-
+          uv run --frozen --no-sync pytest
+          tests/test_dependency_contract.py::test_clean_runtime_imports_supported_entry_points
+          --run-runtime-install --no-cov
 
       - name: Run tests
-        run: uv run --frozen pytest --cov-report=xml
+        run: uv run --frozen --no-sync pytest --cov-report=xml
 
       - name: Coverage comment
         uses: MishaKav/pytest-coverage-comment@v1.10.0

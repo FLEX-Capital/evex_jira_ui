@@ -9,7 +9,7 @@ WORKDIR /app
 COPY requirements.runtime.txt /app/requirements.runtime.txt
 # CKV_DOCKER_3: create an unprivileged user in the same layer as the install
 # (DL3059: avoid consecutive RUN instructions).
-RUN pip install --no-cache-dir -r /app/requirements.runtime.txt \
+RUN pip install --no-cache-dir --require-hashes -r /app/requirements.runtime.txt \
     && useradd --create-home --uid 10001 appuser
 
 # Copy the app (owned by the unprivileged user so Streamlit can write its cache)

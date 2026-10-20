@@ -1,6 +1,6 @@
 """Build the board-meeting deck for the Amparex AI-assistability analysis.
 
-    uv run --group dev python build_board_deck.py
+    uv run --group analysis --env-file .env python build_board_deck.py
 
 Produces ``amparex_ai_leverage_board.pptx``: ten 16:9 slides meant to be dragged
 into an existing board deck. Every chart is drawn from native PowerPoint shapes

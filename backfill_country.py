@@ -5,8 +5,8 @@ resolved without re-pulling anything from Jira. Only the asset -> Land mapping
 is fetched, and only for ids the cache does not already know.
 
 Usage:
-  uv run python backfill_country.py --dry-run
-  uv run python backfill_country.py
+  uv run --env-file .env python backfill_country.py --dry-run
+  uv run --env-file .env python backfill_country.py
 """
 
 import argparse
