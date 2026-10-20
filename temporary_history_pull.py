@@ -31,17 +31,20 @@ def _follow_today(today):
 
 @st.fragment(run_every=5)
 def render_history_pull():
+    """Render authenticated history-import controls with an independent project/window state."""
     require_current_session()
     with st.container():
         st.subheader("Backfill / Datenimport")
         st.caption(
-            "Lädt Tickets, die im gewählten Zeitraum erstellt wurden, für die gewählten Service Desks. "
+            "Lädt Tickets, die im gewählten Zeitraum erstellt wurden, "
+            "für die gewählten Service Desks. "
             "Beide Tage zählen vollständig (Berlin); heute endet am Importstart. "
             "Diese Auswahl ist unabhängig von den Filtern in der Seitenleiste."
         )
         st.caption(
             "Vorhandene Tickets werden über ihren Jira-Schlüssel aktualisiert, neue ergänzt. "
-            "Ältere Tickets und parallele Änderungen bleiben erhalten. Unbekannte Kategorien werden automatisch ergänzt."
+            "Ältere Tickets und parallele Änderungen bleiben erhalten. "
+            "Unbekannte Kategorien werden automatisch ergänzt."
         )
         busy = sync_jobs.JOB.snapshot().get("state") == "running"
         now = datetime.now(BERLIN)
@@ -85,7 +88,8 @@ def render_history_pull():
                 st.session_state.pop(REJECTED_KEY, None)
             else:
                 st.session_state[REJECTED_KEY] = (
-                    "Ein Datenimport läuft bereits oder konnte nicht gestartet werden. Bitte später erneut versuchen."
+                    "Ein Datenimport läuft bereits oder konnte nicht gestartet "
+                    "werden. Bitte später erneut versuchen."
                 )
             st.rerun()
         sync_jobs.render_sync_feedback("custom")

@@ -25,9 +25,7 @@ class RetryPolicy:
             or len(self.fallback_delays) != self.attempts - 1
             or not math.isfinite(self.max_delay)
             or self.max_delay < 0
-            or any(
-                not math.isfinite(delay) or delay < 0 for delay in self.fallback_delays
-            )
+            or any(not math.isfinite(delay) or delay < 0 for delay in self.fallback_delays)
         ):
             raise ValueError("invalid_retry_policy")
 
@@ -59,9 +57,7 @@ RetryDeferred = RetryDeferredError
 InvalidSearchPayload = InvalidSearchPayloadError
 
 
-def retry_after_delay(
-    headers: Mapping[str, str], fallback: float, *, now: datetime
-) -> float:
+def retry_after_delay(headers: Mapping[str, str], fallback: float, *, now: datetime) -> float:
     """Honor numeric/HTTP-date Retry-After; invalid values use the fallback."""
     value = next(
         (value for name, value in headers.items() if name.casefold() == "retry-after"),
@@ -106,20 +102,16 @@ def with_retries[T](
             return operation()
         except Exception as exc:
             response = getattr(exc, "response", None)
-            status = (
-                getattr(response, "status_code", None) if response is not None else None
-            )
+            status = getattr(response, "status_code", None) if response is not None else None
             if status is None:
                 status = getattr(exc, "status_code", None)
-            transient = isinstance(
-                exc, (requests.Timeout, requests.ConnectionError)
-            ) or (isinstance(status, int) and (status == 429 or 500 <= status < 600))
+            transient = isinstance(exc, (requests.Timeout, requests.ConnectionError)) or (
+                isinstance(status, int) and (status == 429 or 500 <= status < 600)
+            )
             if not transient or attempt == policy.attempts - 1:
                 raise
             headers = response.headers if response is not None else {}
-            delay = retry_after_delay(
-                headers, policy.fallback_delays[attempt], now=now()
-            )
+            delay = retry_after_delay(headers, policy.fallback_delays[attempt], now=now())
             if delay > policy.max_delay:
                 raise RetryDeferred(delay) from None
             sleep(delay)

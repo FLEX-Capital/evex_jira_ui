@@ -26,9 +26,7 @@ from settings import load_settings
 
 
 @pytest.mark.parametrize("operation", ["merge", "migrate"])
-def test_country_alias_keeps_one_canonical_artifact(
-    tmp_path: Path, operation: str
-) -> None:
+def test_country_alias_keeps_one_canonical_artifact(tmp_path: Path, operation: str) -> None:
     """An alias shares canonical publication, backups and subsequent writers."""
     canonical = tmp_path / "countries.json"
     alias = tmp_path / "alias.json"
@@ -79,9 +77,7 @@ def test_country_completion_timestamp_precedes_ordered_consumption(
     """A fast old response blocked behind another lookup cannot outrank a newer writer."""
     config = load_settings({})
     identity = AssetIdentity(config.tenant.cloud_id, config.tenant.workspace_id, "2")
-    frame = pd.DataFrame(
-        [{"key": "SDAX-1", "ansprechpartner": "ID_1", "filiale": "ID_2"}]
-    )
+    frame = pd.DataFrame([{"key": "SDAX-1", "ansprechpartner": "ID_1", "filiale": "ID_2"}])
     frame.attrs["evex_jira_tenant"] = config.tenant.as_dict()
     path = tmp_path / "countries.json"
     first = datetime(2026, 10, 1, tzinfo=UTC)
@@ -137,17 +133,13 @@ def test_country_completion_timestamp_precedes_ordered_consumption(
     try:
         assert fast_done.wait(5)
         # The old response has completed while the ordered first result is blocked.
-        country_cache.merge_country_entries(
-            path, [CountryEntry(identity, "found", "New", second)]
-        )
+        country_cache.merge_country_entries(path, [CountryEntry(identity, "found", "New", second)])
     finally:
         release_slow.set()
         thread.join(5)
     assert not thread.is_alive() and not errors
     assert prepared[0].entries[identity].fetched_at == first
-    merged = country_cache.merge_country_entries(
-        path, list(prepared[0].entries.values())
-    )
+    merged = country_cache.merge_country_entries(path, list(prepared[0].entries.values()))
     assert merged.entries[identity].country == "New"
 
 
@@ -188,9 +180,7 @@ def test_mixed_link_outcomes_keep_a_coherent_previous_snapshot(
         assert row.clones_of_clones == "OTHER-3" and pd.isna(row.has_axt_clone_clone)
     else:
         assert row.clones_of_clones == "OTHER-1,AX-9"
-        assert row.clone_types_of_clones == "Relates,Cloners" and bool(
-            row.has_axt_clone_clone
-        )
+        assert row.clone_types_of_clones == "Relates,Cloners" and bool(row.has_axt_clone_clone)
 
 
 def test_optional_raw_publication_failure_preserves_previous_snapshot(

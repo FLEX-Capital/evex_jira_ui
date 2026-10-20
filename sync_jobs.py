@@ -35,9 +35,7 @@ class SyncJobs:
         self.failure: tuple[Path, object, dict[str, Any]] | None = None
         self.data_path: Path | None = None
 
-    def start(
-        self, request: SyncRequest, *, data_path: str | Path | None = None
-    ) -> bool:
+    def start(self, request: SyncRequest, *, data_path: str | Path | None = None) -> bool:
         """Admit an import with paths frozen before its worker is launched."""
         data_path = Path(data_path or load_settings().paths.tickets).resolve()
         admitted = threading.Event()
@@ -56,12 +54,8 @@ class SyncJobs:
                 run_sync(request, progress=progress, data_path=data_path)
             except data_loading.ImportBusyError:
                 pass
-            except (
-                Exception
-            ) as exc:  # noqa: BLE001 - expose pre-admission/storage failures
-                diagnostic = safe_diagnostic(
-                    exc, operation_id=uuid4().hex, stage="save"
-                )
+            except Exception as exc:  # noqa: BLE001 - expose pre-admission/storage failures
+                diagnostic = safe_diagnostic(exc, operation_id=uuid4().hex, stage="save")
                 with self.lock:
                     self.failure = (
                         data_path,
@@ -92,6 +86,7 @@ class SyncJobs:
         return bool(accepted)
 
     def snapshot(self):
+        """Read current shared status and reconcile interrupted worker state."""
         path = self.data_path or load_settings().paths.tickets
         revision = None
         try:
@@ -131,6 +126,7 @@ class SyncJobs:
         return status
 
     def resume(self):
+        """Resume the captured incomplete request when no other import owns the lock."""
         status = self.snapshot()
         if status.get("state") not in {"interrupted", "partial", "failed"}:
             return False
@@ -155,6 +151,7 @@ JOB = SyncJobs()
 
 
 def render_sync_feedback(location):
+    """Show safe progress and completion feedback with independent resume controls."""
     status = JOB.snapshot()
     token = (status.get("run_id"), status.get("state"))
     previous = st.session_state.get("_sync_seen_run_state")
@@ -176,20 +173,22 @@ def render_sync_feedback(location):
         return
     saved = status.get("request") or {}
     if saved:
-        labels = ", ".join(
-            BY_KEY[p].label for p in saved.get("projects", []) if p in BY_KEY
-        )
+        labels = ", ".join(BY_KEY[p].label for p in saved.get("projects", []) if p in BY_KEY)
         st.caption(f"Letzter/laufender Import: {labels}")
     if state == "running":
         st.info(f"Import läuft im Hintergrund. {status.get('progress', '')}")
         return
     if state == "interrupted":
         st.warning(
-            "Import durch einen Server-Neustart unterbrochen. Gespeicherter Fortschritt kann fortgesetzt werden."
+            "Import durch einen Server-Neustart unterbrochen. Gespeicherter "
+            "Fortschritt kann fortgesetzt werden."
         )
     report = status.get("report") or {}
     if report:
-        message = f"{sum(report.get('counts', {}).values())} Tickets geladen. {report.get('rows', 0)} Tickets im Cache."
+        message = (
+            f"{sum(report.get('counts', {}).values())} Tickets geladen. "
+            f"{report.get('rows', 0)} Tickets im Cache."
+        )
         if report.get("complete"):
             st.success(message)
         else:
@@ -205,26 +204,22 @@ def render_sync_feedback(location):
         skipped = categories.get("skipped_cells", 0)
         if protected or skipped:
             st.info(
-                f"Parallele Änderungen beibehalten: {protected} Tickets, {skipped} Kategorieänderungen übersprungen."
+                f"Parallele Änderungen beibehalten: {protected} Tickets, {skipped} "
+                f"Kategorieänderungen übersprungen."
             )
         for project, count in report.get("counts", {}).items():
-            st.write(
-                f"{BY_KEY[project].label if project in BY_KEY else project}: {count} Tickets"
-            )
+            st.write(f"{BY_KEY[project].label if project in BY_KEY else project}: {count} Tickets")
         for project, error in report.get("errors", {}).items():
-            st.error(
-                f"{BY_KEY[project].label if project in BY_KEY else project}: {error}"
-            )
+            st.error(f"{BY_KEY[project].label if project in BY_KEY else project}: {error}")
         for project, count in report.get("asset_failures", {}).items():
             if count:
                 st.warning(
-                    f"{project}: Assets-Daten bei {count} Tickets unvollständig. Jira-/Assets-Berechtigungen prüfen."
+                    f"{project}: Assets-Daten bei {count} Tickets unvollständig. "
+                    f"Jira-/Assets-Berechtigungen prüfen."
                 )
         for project, count in report.get("link_failures", {}).items():
             if count:
-                st.warning(
-                    f"{project}: Beziehungsdaten bei {count} Referenzen unvollständig."
-                )
+                st.warning(f"{project}: Beziehungsdaten bei {count} Referenzen unvollständig.")
         for project, count in report.get("invalid_rows", {}).items():
             if count:
                 st.warning(
@@ -239,18 +234,21 @@ def render_sync_feedback(location):
         if st.button("⏯ Import fortsetzen", key=f"sync_resume_{location}"):
             if not JOB.resume():
                 st.warning(
-                    "Import konnte nicht gestartet werden. Möglicherweise läuft bereits ein anderer Import."
+                    "Import konnte nicht gestartet werden. Möglicherweise läuft "
+                    "bereits ein anderer Import."
                 )
             st.rerun()
 
 
 @st.fragment(run_every=5)
 def render_sync_status(location):
+    """Render current import feedback only for the current authenticated generation."""
     require_current_session()
     render_sync_feedback(location)
 
 
 def render_sidebar_refresh(start, end):
+    """Render the shared selected-window import action and worker state."""
     busy = JOB.snapshot().get("state") == "running"
     if st.button("🔄 aktualisieren", key="sync_sidebar_start", disabled=busy):
         request = make_sync_request(start, end, repair_sources=True, publish_raw=True)

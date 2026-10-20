@@ -10,11 +10,11 @@
   "sources": [
     {
       "path": "build_board_deck.py",
-      "sha256": "9272b61805c984e3baa8c6488307651967c52776d56b09df6043c60dcbc4fc17"
+      "sha256": "3cd62e779f5a3d38c5e0c24490035b7188704886dcf5f7bf4677b35b63000ca6"
     },
     {
       "path": "amparex_ai_assist_analysis.ipynb",
-      "sha256": "9bb6f0482276b5c5d0935cd6b5d89b3ccd47fd338bf033a7192af359be250fa2"
+      "sha256": "62a1ea29f0932fd8b5d6c35fa3f611d73fe36287ff4f47dc0f6754617803b144"
     }
   ],
   "note": "Source hashes capture current preserved implementation evidence, not original extraction provenance."

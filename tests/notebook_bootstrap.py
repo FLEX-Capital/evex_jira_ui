@@ -73,9 +73,7 @@ def classification_runner(selected: pd.DataFrame, **kwargs: Any) -> pd.DataFrame
     """Exercise the real identity-aware workflow with a fake worker."""
     fake_calls.extend(selected.key.tolist())
     with patch.object(classifier, "classify_one", side_effect=fake_one):
-        return classifier.classify_tickets(
-            selected, client=object(), progress=False, **kwargs
-        )
+        return classifier.classify_tickets(selected, client=object(), progress=False, **kwargs)
 
 
 configuration = classifier.classifier_configuration(load_settings(), model="synthetic")

@@ -52,8 +52,7 @@ def _valid_list(column: str, value: object) -> bool:
         return all(
             isinstance(reference, dict)
             and reference.get("source") in ("ansprechpartner", "filiale", "zentrale")
-            and reference.get("provenance")
-            in ("modern", "legacy_unverified", "rejected")
+            and reference.get("provenance") in ("modern", "legacy_unverified", "rejected")
             and (
                 reference["provenance"] != "modern"
                 or all(
@@ -120,9 +119,9 @@ def _validate(frame: pd.DataFrame) -> None:
         elif column in _BOOLS:
             valid = pd.api.types.is_bool_dtype(values.dtype)
         elif pd.api.types.is_numeric_dtype(template[column].dtype):
-            valid = pd.api.types.is_numeric_dtype(
+            valid = pd.api.types.is_numeric_dtype(values.dtype) and not pd.api.types.is_bool_dtype(
                 values.dtype
-            ) and not pd.api.types.is_bool_dtype(values.dtype)
+            )
         elif column in _LISTS:
             valid = all(_valid_list(column, value) for value in values)
         else:
@@ -137,13 +136,9 @@ def _validate(frame: pd.DataFrame) -> None:
         raise CacheSchemaError("invalid_completion_state", ("completion_state",))
     if not frame.duration_quality.isin(("valid", "missing", "reversed")).all():
         raise CacheSchemaError("invalid_duration_quality", ("duration_quality",))
-    expected_done = frame.completion_state.map({"done": True, "open": False}).astype(
-        "boolean"
-    )
+    expected_done = frame.completion_state.map({"done": True, "open": False}).astype("boolean")
     if not frame.is_done.astype("boolean").equals(expected_done):
-        raise CacheSchemaError(
-            "inconsistent_completion", ("completion_state", "is_done")
-        )
+        raise CacheSchemaError("inconsistent_completion", ("completion_state", "is_done"))
 
 
 def normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -161,13 +156,9 @@ def normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
     if not isinstance(frame, pd.DataFrame):
         raise CacheSchemaError("not_dataframe")
     version = frame.attrs.get(SCHEMA_ATTR)
-    if SCHEMA_ATTR in frame.attrs and (
-        type(version) is not int or version not in (1, 2)
-    ):
+    if SCHEMA_ATTR in frame.attrs and (type(version) is not int or version not in (1, 2)):
         raise CacheSchemaError("unsupported_schema_version")
-    if not frame.columns.is_unique or not all(
-        isinstance(column, str) for column in frame
-    ):
+    if not frame.columns.is_unique or not all(isinstance(column, str) for column in frame):
         raise CacheSchemaError("invalid_columns")
     if not frame.empty and (
         "key" not in frame
@@ -199,19 +190,13 @@ def normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
         )
         # Stable input ordering breaks same-instant ties; invalid recency loses
         # to a known instant, without losing rows with otherwise unknown dates.
-        order = (
-            times.reset_index(drop=True)
-            .sort_values(kind="stable", na_position="first")
-            .index
-        )
+        order = times.reset_index(drop=True).sort_values(kind="stable", na_position="first").index
         result = result.iloc[order].drop_duplicates("key", keep="last")
         result = result.sort_index(kind="stable").reset_index(drop=True)
         result = enrich_jira_time_metrics(result)
         for column in template:
             if column not in result:
-                result[column] = pd.Series(
-                    index=result.index, dtype=template[column].dtype
-                )
+                result[column] = pd.Series(index=result.index, dtype=template[column].dtype)
         countries = attach_country(result, {})
         for column in ("Land", "land_quelle"):
             result[column] = result[column].fillna(countries[column])
@@ -222,9 +207,7 @@ def normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
             raise CacheSchemaError("invalid_legacy_type", (column,)) from None
     for column in _COUNTS:
         try:
-            result[column] = pd.to_numeric(result[column], errors="coerce").astype(
-                "Int64"
-            )
+            result[column] = pd.to_numeric(result[column], errors="coerce").astype("Int64")
         except (TypeError, ValueError, OverflowError):
             raise CacheSchemaError("invalid_legacy_type", (column,)) from None
     result.attrs = dict(frame.attrs)

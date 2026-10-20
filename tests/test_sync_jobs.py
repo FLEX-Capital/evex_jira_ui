@@ -52,9 +52,7 @@ def test_two_ui_coordinators_and_cli_admit_only_one_import(storage, monkeypatch)
 
 
 @pytest.mark.parametrize("later_state", ["completed", "interrupted", "running"])
-def test_new_shared_run_supersedes_local_pre_admission_failure(
-    storage, monkeypatch, later_state
-):
+def test_new_shared_run_supersedes_local_pre_admission_failure(storage, monkeypatch, later_state):
     import sync_jobs
 
     write = desk_sync.write_json_atomic
@@ -88,16 +86,12 @@ def test_new_shared_run_supersedes_local_pre_admission_failure(
     assert jobs.snapshot()["request"]["projects"] == ["SDEU"]
     if later_state == "interrupted":
         accepted = []
-        monkeypatch.setattr(
-            jobs, "start", lambda saved, **kwargs: accepted.append(saved) or True
-        )
+        monkeypatch.setattr(jobs, "start", lambda saved, **kwargs: accepted.append(saved) or True)
         assert jobs.resume()
         assert accepted[0].projects == ("SDEU",) and accepted[0].resume
 
 
-def test_killed_process_is_observable_and_its_checkpoint_can_resume(
-    storage, monkeypatch
-):
+def test_killed_process_is_observable_and_its_checkpoint_can_resume(storage, monkeypatch):
     import sync_jobs
 
     code = """import sys,time,json
@@ -154,9 +148,7 @@ def test_cli_and_both_ui_controls_produce_identical_schema_after_category_retry(
     jira.myself.return_value = {"timeZone": "UTC"}
     jira.enhanced_search_issues.return_value = {"issues": [raw()]}
     monkeypatch.setattr(jira_loader, "JIRA", lambda *a, **k: jira)
-    monkeypatch.setattr(
-        sync_checkpoints, "fetch_jira_issues", jira_loader.fetch_jira_issues
-    )
+    monkeypatch.setattr(sync_checkpoints, "fetch_jira_issues", jira_loader.fetch_jira_issues)
     monkeypatch.setenv("JIRA_URL", "https://jira.example")
     monkeypatch.setenv("JIRA_USERNAME", "test-user")
     monkeypatch.setenv("JIRA_PASSWORD", "synthetic-password")
@@ -201,7 +193,9 @@ def test_cli_and_both_ui_controls_produce_identical_schema_after_category_retry(
                 "issues": [raw()] if "project = SDAX" in kwargs["jql_str"] else []
             }
             app = AppTest.from_string(
-                "from datetime import datetime,UTC\nimport streamlit as st\nfrom sync_jobs import render_sidebar_refresh\nwith st.sidebar:\n    render_sidebar_refresh(datetime(2026,9,1,tzinfo=UTC),datetime(2026,9,10,tzinfo=UTC))"
+                "from datetime import datetime,UTC\nimport streamlit as st\nfrom "
+                "sync_jobs import render_sidebar_refresh\nwith st.sidebar:\n    "
+                "render_sidebar_refresh(datetime(2026,9,1,tzinfo=UTC),datetime(2026,9,10,tzinfo=UTC))"
             ).run()
             app.button(key="sync_sidebar_start").click().run()
             assert not app.exception

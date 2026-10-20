@@ -14,6 +14,8 @@ from settings import DEFAULT_TENANT, Settings, load_settings
 
 
 class CheckpointStore:
+    """Own resumable raw page checkpoints for a captured data root and tenant."""
+
     def __init__(
         self,
         checkpoint_dir: str | Path | None = None,
@@ -23,9 +25,7 @@ class CheckpointStore:
     ) -> None:
         self.settings = settings or load_settings()
         self.tenant = self.settings.tenant
-        checkpoint_dir = (
-            self.settings.paths.root if checkpoint_dir is None else checkpoint_dir
-        )
+        checkpoint_dir = self.settings.paths.root if checkpoint_dir is None else checkpoint_dir
         self.template = str(Path(checkpoint_dir) / "backfill_{project}.json")
         self.save_every = 100
         self.progress = progress
@@ -78,7 +78,7 @@ class CheckpointStore:
 
         def append(issues):
             with open(log_path, "a") as handle:
-                handle.writelines((json.dumps(issue) + "\n" for issue in issues))
+                handle.writelines(json.dumps(issue) + "\n" for issue in issues)
                 handle.flush()
                 os.fsync(handle.fileno())
             self._say(f"  [{project}] checkpointed +{len(issues)} issues", flush=True)
@@ -114,7 +114,7 @@ class CheckpointStore:
 
         def append(issues):
             with open(log_path, "a") as handle:
-                handle.writelines((json.dumps(issue) + "\n" for issue in issues))
+                handle.writelines(json.dumps(issue) + "\n" for issue in issues)
                 handle.flush()
                 os.fsync(handle.fileno())
             self._say(f"  [{project}] checkpointed +{len(issues)} issues", flush=True)
@@ -153,21 +153,15 @@ class CheckpointStore:
                 except json.JSONDecodeError:
                     self._say(f"  [{project}] discarding torn final line", flush=True)
                     break
-        issues = filter_issue_window(
-            project, issues, start_dt, None, invalid_row_cb=invalid_row_cb
-        )
+        issues = filter_issue_window(project, issues, start_dt, None, invalid_row_cb=invalid_row_cb)
         issues = dedupe_issues(issues)
         if not issues:
             return ([], None, None)
-        oldest = min(
-            (
-                as_utc(datetime.fromisoformat(issue["fields"]["created"]))
-                for issue in issues
-            )
-        )
+        oldest = min(as_utc(datetime.fromisoformat(issue["fields"]["created"])) for issue in issues)
         return (issues, oldest, as_utc(datetime.fromisoformat(meta["end"])))
 
     def clear_partial(self, project):
+        """Remove only this project's partial checkpoint artifacts."""
         for path in self._partial_paths(project):
             if os.path.exists(path):
                 os.unlink(path)
@@ -190,7 +184,10 @@ class CheckpointStore:
             elapsed = now - started
             rate = count / elapsed if elapsed else 0
             self._say(
-                f"  [{project}] {count:>6} issues | {self._fmt_duration(elapsed)} elapsed | {rate:.1f} issues/s",
+                (
+                    f"  [{project}] {count:>6} issues | {self._fmt_duration(elapsed)} "
+                    f"elapsed | {rate:.1f} issues/s"
+                ),
                 flush=True,
             )
 
@@ -231,9 +228,7 @@ class CheckpointStore:
                     saved.get("assets_cloud_id"),
                     saved.get("assets_workspace_id"),
                 )
-                legacy_default = (
-                    saved_tenant == (None, None) and self.tenant == DEFAULT_TENANT
-                )
+                legacy_default = saved_tenant == (None, None) and self.tenant == DEFAULT_TENANT
                 if not legacy_default and saved_tenant != (
                     self.tenant.cloud_id,
                     self.tenant.workspace_id,
@@ -242,13 +237,12 @@ class CheckpointStore:
                 saved_start = as_utc(datetime.fromisoformat(saved["start"]))
                 if saved.get("project") != project or saved_start > start_dt:
                     raise ValueError(
-                        f"{project}: checkpoint covers a different start/project; rerun without --resume"
+                        f"{project}: checkpoint covers a different start/project; rerun "
+                        f"without --resume"
                     )
                 saved_end = as_utc(datetime.fromisoformat(saved["end"]))
                 if saved_end > end_dt:
-                    raise ValueError(
-                        f"{project}: checkpoint ends after the requested window"
-                    )
+                    raise ValueError(f"{project}: checkpoint ends after the requested window")
                 issues = filter_issue_window(
                     project,
                     saved["issues"],
@@ -276,7 +270,10 @@ class CheckpointStore:
             )
             if partial:
                 self._say(
-                    f"[{project}] resuming: {len(partial)} issues already saved, oldest {oldest_partial.isoformat()}",
+                    (
+                        f"[{project}] resuming: {len(partial)} issues already saved, "
+                        f"oldest {oldest_partial.isoformat()}"
+                    ),
                     flush=True,
                 )
         if retry_incomplete or invalid_count:
@@ -321,9 +318,7 @@ class CheckpointStore:
                     settings=self.settings,
                 )
             )
-        fresh = filter_issue_window(
-            project, fresh, start_dt, end_dt, invalid_row_cb=record_invalid
-        )
+        fresh = filter_issue_window(project, fresh, start_dt, end_dt, invalid_row_cb=record_invalid)
         issues = dedupe_issues(issues + partial + fresh)
         issues = filter_issue_window(
             project, issues, start_dt, end_dt, invalid_row_cb=record_invalid
@@ -358,9 +353,8 @@ def fetch_project(
     invalid_row_cb=None,
     settings=None,
 ):
-    return CheckpointStore(
-        checkpoint_dir, progress=progress, settings=settings
-    ).fetch_project(
+    """Fetch or resume one selected project through a checkpoint store."""
+    return CheckpointStore(checkpoint_dir, progress=progress, settings=settings).fetch_project(
         project,
         start_dt,
         end_dt,

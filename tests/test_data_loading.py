@@ -53,9 +53,7 @@ class PersistenceTests(unittest.TestCase):
             data_loading.save_data(pd.DataFrame({"key": ["SDAX-1", "SDEU-2"]}))
             with self.assertRaises(data_loading.CacheChangedError):
                 data_loading.save_data_if_unchanged(snapshot, revision)
-            self.assertEqual(
-                data_loading.load_data()["key"].tolist(), ["SDAX-1", "SDEU-2"]
-            )
+            self.assertEqual(data_loading.load_data()["key"].tolist(), ["SDAX-1", "SDEU-2"])
 
     def test_transaction_serializes_competing_writer(self):
         entered, done = threading.Event(), threading.Event()

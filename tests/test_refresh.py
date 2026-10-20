@@ -64,8 +64,6 @@ def test_merge_and_resume_keep_newer_raw_snapshot(
     assert loaded == [new]
     store.fetch_jira_issues = Mock(return_value=[old])
     assert store.fetch_project("SDAX", START, END + timedelta(days=1), True) == [new]
-    monkeypatch.setattr(
-        sync_checkpoints, "fetch_jira_issues", lambda *a, **k: [old, new]
-    )
+    monkeypatch.setattr(sync_checkpoints, "fetch_jira_issues", lambda *a, **k: [old, new])
     assert desk_sync.run_sync(request(projects=["SDAX"])).complete
     assert pd.read_pickle(storage).loc[0, "summary"] == "newer"

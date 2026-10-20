@@ -65,9 +65,7 @@ class TransformationTests(unittest.TestCase):
                     raw = issue(main_id="41", sub_id="41")
                     for field in ("customfield_10680", "customfield_10679"):
                         raw["fields"][field][0]["workspaceId"] = (
-                            workspace
-                            if field == rejected_field
-                            else jira_loader.WORKSPACE_ID
+                            workspace if field == rejected_field else jira_loader.WORKSPACE_ID
                         )
                     with patch.object(
                         jira_loader,
@@ -138,9 +136,7 @@ class TransformationTests(unittest.TestCase):
                 with patch.object(jira_loader, "fetch_asset_object", side_effect=fetch):
                     enriched = jira_loader.enrich_issue_assets(raw)
                 fresh = self.transformation.load_issues_Euronet([enriched])
-                result = self.transformation.upsert_jira_data(old, fresh).set_index(
-                    "key"
-                )
+                result = self.transformation.upsert_jira_data(old, fresh).set_index("key")
                 self.assertEqual(
                     result.loc["SDEU-1", "Hauptkategorie"],
                     "Unbekannt" if fails else "Recovered",
@@ -176,9 +172,7 @@ class TransformationTests(unittest.TestCase):
         )
         row = self.transformation.load_issues_Euronet(
             [raw],
-            link_graph=LinkGraph(
-                {"EXAX-7": (IssueLink("Cloners", "outward", "AX-9"),)}, ()
-            ),
+            link_graph=LinkGraph({"EXAX-7": (IssueLink("Cloners", "outward", "AX-9"),)}, ()),
         ).iloc[0]
 
         self.assertEqual(row["firma"], "Euronet")
@@ -203,9 +197,7 @@ class TransformationTests(unittest.TestCase):
             assets_workspace_id=jira_loader.WORKSPACE_ID,
             assets_cloud_id=jira_loader.CLOUD_ID,
         )
-        with patch.dict(
-            self.transformation.object_id_to_name, {"main-1": "Stale sandbox label"}
-        ):
+        with patch.dict(self.transformation.object_id_to_name, {"main-1": "Stale sandbox label"}):
             row = self.transformation.load_issues_Euronet([raw]).iloc[0]
         self.assertEqual(row["Hauptkategorie"], "Unbekannt")
         self.assertEqual(row["Unterkategorie"], "Unbekannt")
@@ -298,9 +290,7 @@ class TransformationTests(unittest.TestCase):
             list(empty.columns),
             list(self.transformation.load_issues_Amparex([]).columns),
         )
-        self.assertTrue(
-            str(empty["created"].dtype).startswith("datetime64[ns, Europe/Berlin]")
-        )
+        self.assertTrue(str(empty["created"].dtype).startswith("datetime64[ns, Europe/Berlin]"))
         self.assertEqual(str(empty["is_done"].dtype), "boolean")
         self.assertEqual(empty["has_exax_clone"].dtype, bool)
         self.assertEqual(empty["has_axt_clone_clone"].dtype, bool)
@@ -394,9 +384,7 @@ class CalendarDayResolutionTests(unittest.TestCase):
                     ]
                 )
                 result = enrich_jira_time_metrics(frame)
-                self.assertEqual(
-                    result.loc[0, "time_to_resolution_calendar_days"], days
-                )
+                self.assertEqual(result.loc[0, "time_to_resolution_calendar_days"], days)
                 self.assertEqual(
                     result.loc[0, "resolution"],
                     "Same day" if days == 0 else "> 1 day",

@@ -18,9 +18,7 @@ def captured(monkeypatch):
     """Capture actual compatibility-adapter figures without rendering a UI."""
     seen = []
     monkeypatch.setattr(plotting.st, "radio", lambda *a, **k: plotting.MODE_ABS)
-    monkeypatch.setattr(
-        plotting.st, "plotly_chart", lambda figure, **kw: seen.append(figure)
-    )
+    monkeypatch.setattr(plotting.st, "plotly_chart", lambda figure, **kw: seen.append(figure))
     return seen
 
 

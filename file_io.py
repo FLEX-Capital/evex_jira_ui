@@ -95,9 +95,7 @@ def write_json_atomic(path: Path, value: object) -> None:
 
     def serialize(handle: BinaryIO) -> None:
         handle.write(
-            json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True).encode(
-                "utf-8"
-            )
+            json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
         )
 
     atomic_write(Path(path), serialize)

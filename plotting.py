@@ -23,7 +23,7 @@ def generate_distinct_colors(n: int) -> list[str]:
     colors = []
     for h in hues:
         r, g, b = colorsys.hsv_to_rgb(h, 0.65, 0.9)
-        colors.append(f"rgb({int(r*255)},{int(g*255)},{int(b*255)})")
+        colors.append(f"rgb({int(r * 255)},{int(g * 255)},{int(b * 255)})")
     return colors
 
 
@@ -58,17 +58,13 @@ def create_resolution_time_charts(df: pd.DataFrame) -> list[go.Figure]:
         group_cols = [bin_col]
         if group_col:
             # Include unset fields so all three charts retain the same totals.
-            values = completed.get(
-                group_col, pd.Series(index=completed.index, dtype="object")
-            )
+            values = completed.get(group_col, pd.Series(index=completed.index, dtype="object"))
             completed[group_col] = (
                 values.astype("string").fillna("").str.strip().replace("", "Unbekannt")
             )
             group_cols.append(group_col)
 
-        result = (
-            completed.groupby(group_cols, observed=False)["key"].count().reset_index()
-        )
+        result = completed.groupby(group_cols, observed=False)["key"].count().reset_index()
         title = "Anzahl Fertige Tickets nach Bearbeitungszeit"
         if group_label:
             title += f" – {group_label}"
@@ -143,17 +139,11 @@ def create_toggle_chart(
         order.insert(0, force_bottom_value)
     data = ChartData(data.table, data.x_order, tuple(order), data.totals, data.cohort)
     modes = [MODE_ABS, MODE_LOG, MODE_REL] if allow_log else [MODE_ABS, MODE_REL]
-    choice = st.radio(
-        "Ansicht wählen:", modes, horizontal=True, index=0, key=toggle_key
-    )
+    choice = st.radio("Ansicht wählen:", modes, horizontal=True, index=0, key=toggle_key)
     mode: Literal["absolute", "relative", "log"] = (
-        "absolute"
-        if choice == MODE_ABS
-        else "relative" if choice == MODE_REL else "log"
+        "absolute" if choice == MODE_ABS else "relative" if choice == MODE_REL else "log"
     )
-    fig = build_distribution_figure(
-        data, mode=mode, colors=color_map, height=plot_height
-    )
+    fig = build_distribution_figure(data, mode=mode, colors=color_map, height=plot_height)
     fig.update_xaxes(title_text=x_label or x_col)
     st.plotly_chart(
         fig,
@@ -188,11 +178,7 @@ def build_distribution_figure(
         raise ValueError("invalid_distribution_mode")
     fig = go.Figure()
     for group in data.group_order:
-        rows = (
-            data.table.loc[data.table["group"] == group]
-            .set_index("x")
-            .reindex(data.x_order)
-        )
+        rows = data.table.loc[data.table["group"] == group].set_index("x").reindex(data.x_order)
         counts = rows["count"].fillna(0).tolist()
         percentages = rows["percent"].fillna(0).tolist()
         y = [value / 100 for value in percentages] if mode == "relative" else counts
@@ -202,9 +188,7 @@ def build_distribution_figure(
         ]
         color = colors.get(group) if colors else None
         if kind == "bar":
-            fig.add_trace(
-                go.Bar(x=data.x_order, y=y, name=group, text=labels, marker_color=color)
-            )
+            fig.add_trace(go.Bar(x=data.x_order, y=y, name=group, text=labels, marker_color=color))
         else:
             fig.add_trace(
                 go.Scatter(
@@ -222,11 +206,7 @@ def build_distribution_figure(
         fig.add_trace(
             go.Scatter(
                 x=data.x_order,
-                y=(
-                    [1 if total else 0 for total in totals]
-                    if mode == "relative"
-                    else totals
-                ),
+                y=([1 if total else 0 for total in totals] if mode == "relative" else totals),
                 text=[f"Total: {total}" for total in totals],
                 mode="text",
                 name="_totals",
@@ -255,9 +235,7 @@ def build_distribution_figure(
         )
     else:
         fig.update_yaxes(
-            title_text=(
-                "Prozentualer Anteil" if mode == "relative" else "Anzahl Tickets"
-            ),
+            title_text=("Prozentualer Anteil" if mode == "relative" else "Anzahl Tickets"),
             tickformat=".0%" if mode == "relative" else None,
             range=[0, 1.15 if mode == "relative" else max([1, *totals]) * 1.15],
         )
@@ -281,10 +259,6 @@ def apply_font(fig: go.Figure, base: int = 20) -> go.Figure:
         uniformtext_minsize=base - 2,  # minimum label size
         uniformtext_mode="show",  # do NOT hide or shrink
     )
-    fig.update_layout(
-        legend=dict(title=dict(font=dict(size=base)), font=dict(size=base - 2))
-    )
-    fig.update_layout(
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
+    fig.update_layout(legend=dict(title=dict(font=dict(size=base)), font=dict(size=base - 2)))
+    fig.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig

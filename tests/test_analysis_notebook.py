@@ -126,13 +126,9 @@ def test_notebook_runs_offline_with_selected_cohort(
     assert result["categories"] == (
         [] if notebook_smoke["empty"] else ["Known category", "Unbekannt"]
     )
-    assert (
-        result["labelled_rows"] == len(expected) and result["blocked_transports"] == 5
-    )
+    assert result["labelled_rows"] == len(expected) and result["blocked_transports"] == 5
     assert result["manifest"]["selected_rows"] == len(expected)
-    assert result["manifest"]["excluded_window_rows"] == (
-        3 if notebook_smoke["empty"] else 1
-    )
+    assert result["manifest"]["excluded_window_rows"] == (3 if notebook_smoke["empty"] else 1)
     assert result["manifest"]["excluded_project_rows"] == 1
     assert result["success"] == (2 if notebook_smoke["run"] else 0)
     assert all(

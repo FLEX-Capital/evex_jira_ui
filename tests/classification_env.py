@@ -15,6 +15,4 @@ def forbid_model_network(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("Unmocked model network request in offline tests")
 
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", forbidden)
-    monkeypatch.setattr(
-        httpx.AsyncHTTPTransport, "handle_async_request", async_forbidden
-    )
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", async_forbidden)

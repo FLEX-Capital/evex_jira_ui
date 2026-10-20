@@ -38,9 +38,7 @@ class MaintenanceOutcome:
         object.__setattr__(self, "counts", MappingProxyType(dict(self.counts)))
 
 
-def refresh_source_cache(
-    path: Path, *, settings: Settings | None = None
-) -> MaintenanceOutcome:
+def refresh_source_cache(path: Path, *, settings: Settings | None = None) -> MaintenanceOutcome:
     """Prepare full-cache source updates outside locks, then conditionally publish.
 
     Args:
@@ -60,9 +58,7 @@ def refresh_source_cache(
     )
     require_current_session()
     backup = (
-        save_data_if_unchanged(prepared, revision, path=path, settings=config)
-        if changed
-        else None
+        save_data_if_unchanged(prepared, revision, path=path, settings=config) if changed else None
     )
     remaining = (
         int(prepared["source"].astype("string").fillna("").str.strip().eq("").sum())
@@ -101,9 +97,7 @@ def refresh_country_cache(
     frame, revision = load_data_snapshot(path=path, settings=config)
     frame = frame if frame is not None else pd.DataFrame()
     before = (
-        frame.get("Land", pd.Series(index=frame.index, dtype="string"))
-        .astype("string")
-        .fillna("")
+        frame.get("Land", pd.Series(index=frame.index, dtype="string")).astype("string").fillna("")
     )
     baseline = asset_country.load_cache(path=config.paths.countries, settings=config)
     prepared, cache, stats = asset_country.refresh_countries(
@@ -119,9 +113,7 @@ def refresh_country_cache(
     )
     if data_loading.cache_revision(path) != revision:
         raise CacheChangedError("cache_changed")
-    prepared = asset_country.attach_country(
-        prepared, cache, allow_legacy=True, settings=config
-    )
+    prepared = asset_country.attach_country(prepared, cache, allow_legacy=True, settings=config)
     changed = int(prepared["Land"].astype("string").fillna("").ne(before).sum())
     require_current_session()
     # Retain the revision check even on unchanged Land: a concurrently replaced
@@ -133,9 +125,7 @@ def refresh_country_cache(
         "pending": int(prepared["Land"].eq(NOT_RESOLVED).sum()),
     }
     diagnostics = (
-        (OperationDiagnostic(uuid4().hex, "assets", "unexpected"),)
-        if stats["failed"]
-        else ()
+        (OperationDiagnostic(uuid4().hex, "assets", "unexpected"),) if stats["failed"] else ()
     )
     return MaintenanceOutcome(
         "country",
@@ -157,9 +147,7 @@ def _maintenance_failure(label: str, stage: str, exc: Exception) -> None:
     _show_diagnostic(cause)
     message = f"{label} fehlgeschlagen ({cause.code})."
     if cause.code == "cache_changed":
-        message += (
-            " Cache wurde parallel geändert; bitte die Aktualisierung wiederholen."
-        )
+        message += " Cache wurde parallel geändert; bitte die Aktualisierung wiederholen."
     st.error(message)
 
 
@@ -224,9 +212,7 @@ def render_maintenance(settings: Settings) -> None:
                 ),
             )
         with col_countries:
-            force = st.checkbox(
-                "Bekannte Länder erneut prüfen", key="country_force_refresh"
-            )
+            force = st.checkbox("Bekannte Länder erneut prüfen", key="country_force_refresh")
             refresh_country = st.button(
                 "🌍 Länder aktualisieren",
                 help=(
@@ -237,14 +223,10 @@ def render_maintenance(settings: Settings) -> None:
     if refresh_sources:
         try:
             with st.spinner("Fehlende Ursprünge werden mit Jira abgeglichen …"):
-                outcome = refresh_source_cache(
-                    settings.paths.tickets, settings=settings
-                )
+                outcome = refresh_source_cache(settings.paths.tickets, settings=settings)
             st.session_state["source_sync_success"] = outcome.changed
             if outcome.incomplete:
-                st.session_state["source_sync_remaining"] = outcome.counts.get(
-                    "remaining", 0
-                )
+                st.session_state["source_sync_remaining"] = outcome.counts.get("remaining", 0)
         except Exception as exc:  # noqa: BLE001 - isolate optional maintenance
             _maintenance_failure("Ursprung-Abgleich", "source", exc)
         else:

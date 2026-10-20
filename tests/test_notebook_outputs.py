@@ -93,12 +93,8 @@ def test_execution_count_alone_is_dirty(dirty_notebook: Path, count: int) -> Non
         json.dumps({"cells": MARKER}),
         json.dumps({"cells": [MARKER]}),
         json.dumps({"cells": [{"cell_type": "code", "outputs": {MARKER: 1}}]}),
-        json.dumps(
-            {"cells": [{"cell_type": "code", "outputs": [], "execution_count": MARKER}]}
-        ),
-        json.dumps(
-            {"cells": [{"cell_type": "code", "outputs": [], "execution_count": True}]}
-        ),
+        json.dumps({"cells": [{"cell_type": "code", "outputs": [], "execution_count": MARKER}]}),
+        json.dumps({"cells": [{"cell_type": "code", "outputs": [], "execution_count": True}]}),
     ],
 )
 def test_malformed_input_never_echoes_payload(
@@ -127,15 +123,11 @@ def test_git_discovery_is_tracked_only_and_nul_safe(
     clean = json.dumps({"cells": []})
     tracked.write_text(clean)
     (repo / "untracked.ipynb").write_text(clean)
-    subprocess.run(
-        ["git", "-C", str(repo), "add", "--", "nested/a b ä.ipynb"], check=True
-    )
+    subprocess.run(["git", "-C", str(repo), "add", "--", "nested/a b ä.ipynb"], check=True)
     monkeypatch.chdir(tmp_path)
     assert notebooks.tracked_notebooks(repo) == [tracked]
     assert notebooks.main(["--repo-root", str(repo)]) == 0
-    assert (
-        notebooks.main(["--repo-root", str(repo), "--path", "nested/a b ä.ipynb"]) == 0
-    )
+    assert notebooks.main(["--repo-root", str(repo), "--path", "nested/a b ä.ipynb"]) == 0
 
 
 def test_unsafe_or_missing_paths_fail_without_writes(
@@ -149,9 +141,7 @@ def test_unsafe_or_missing_paths_fail_without_writes(
         assert notebooks.main(["--strip", "--path", str(path)]) == 2
     alias_dir = tmp_path / "alias-dir"
     alias_dir.symlink_to(dirty_notebook.parent, target_is_directory=True)
-    assert (
-        notebooks.main(["--strip", "--path", str(alias_dir / dirty_notebook.name)]) == 2
-    )
+    assert notebooks.main(["--strip", "--path", str(alias_dir / dirty_notebook.name)]) == 2
     assert notebooks.main(["--repo-root", str(tmp_path)]) == 2
     assert dirty_notebook.read_bytes() == before
     assert MARKER not in capsys.readouterr().out
@@ -204,15 +194,9 @@ def test_malformed_cell_types_use_safe_diagnostics(
 ) -> None:
     """Unhashable cell types return a safe validation error without writes or payload."""
     path = tmp_path / "bad.ipynb"
-    path.write_text(
-        json.dumps({"cells": [{"cell_type": cell_type, "source": [MARKER]}]})
-    )
+    path.write_text(json.dumps({"cells": [{"cell_type": cell_type, "source": [MARKER]}]}))
     before = path.read_bytes()
     assert notebooks.main([mode, "--path", str(path)]) == 2
     assert path.read_bytes() == before
     output = capsys.readouterr().out
-    assert (
-        "invalid_notebook" in output
-        and MARKER not in output
-        and "TypeError" not in output
-    )
+    assert "invalid_notebook" in output and MARKER not in output and "TypeError" not in output

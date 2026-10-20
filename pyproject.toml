@@ -40,10 +40,12 @@ analysis = [
   "tqdm>=4.70.1",
 ]
 dev = [
+  "ruff==0.17.1",
   "httpx>=0.28.1",
   "pytest>=8.0",
   "pytest-cov>=5",
   "types-requests>=2.33.0.20261006",
+  "types-pyyaml>=6.0.12.20260906",
 ]
 
 # The suite is also runnable as `python -m unittest discover -s tests`, which puts
@@ -63,6 +65,7 @@ omit = ["tests/*"]
 
 [tool.ruff]
 line-length = 100
+extend-exclude = ["analysis/archive"]
 
 [tool.ruff.lint]
 # E/W: pycodestyle  F: pyflakes  I: isort  N: pep8-naming  UP: pyupgrade  D: pydocstyle
@@ -89,3 +92,10 @@ incremental = false
 python_version = "3.12"
 disallow_untyped_defs = true
 ignore_missing_imports = true
+
+[tool.ruff.lint.per-file-ignores]
+# Existing unittest method naming/docs are separate from maintained production policy.
+"tests/**" = ["D", "N802"]
+# Frozen historical slide code is source-checked and formatted; API docs/types are
+# outside the maintained application scope. Its aggregate snapshot is tested.
+"build_board_deck.py" = ["D103"]

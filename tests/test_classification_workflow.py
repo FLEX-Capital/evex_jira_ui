@@ -136,11 +136,7 @@ def test_changed_implementation_selects_new_identity(
                 change.setattr(
                     classifier,
                     constant,
-                    (
-                        original + 1
-                        if isinstance(original, int)
-                        else original + " changed"
-                    ),
+                    (original + 1 if isinstance(original, int) else original + " changed"),
                 )
             changed = _config()
             call.reset_mock()
@@ -172,20 +168,14 @@ def test_cached_or_invalid_only_batch_does_not_construct_client(tmp_path: Path) 
             frame, path, client=object(), progress=False, configuration=config
         )
     before = path.read_bytes()
-    with patch.object(
-        classifier, "build_client", side_effect=AssertionError("eager client")
-    ):
-        result = classifier.classify_tickets(
-            frame, path, progress=False, configuration=config
-        )
+    with patch.object(classifier, "build_client", side_effect=AssertionError("eager client")):
+        result = classifier.classify_tickets(frame, path, progress=False, configuration=config)
         assert result.key.tolist() == ["SDAX-1"]
         assert classifier.classify_tickets(
             pd.DataFrame(columns=["key"]), path, progress=False, configuration=config
         ).empty
         invalid = classifier.classify_tickets(
-            pd.DataFrame(
-                [{"key": None, "summary": None}, {"key": "SDAX-3", "summary": None}]
-            ),
+            pd.DataFrame([{"key": None, "summary": None}, {"key": "SDAX-3", "summary": None}]),
             path,
             progress=False,
             configuration=config,
@@ -214,13 +204,10 @@ def test_result_selection_does_not_duplicate_notebook_joins(tmp_path: Path) -> N
         [frame, pd.DataFrame([{"key": "SDAX-3", "summary": ""}])], ignore_index=True
     )
     with patch.object(classifier, "build_client", side_effect=AssertionError("client")):
-        result = classifier.classify_tickets(
-            requested, path, progress=False, configuration=config
-        )
+        result = classifier.classify_tickets(requested, path, progress=False, configuration=config)
     assert result.key.tolist() == ["SDAX-1", "SDAX-3"] and result.key.is_unique
     assert (
-        result.iloc[0].intent_label == "requested-current"
-        and result.iloc[1].error == "empty_text"
+        result.iloc[0].intent_label == "requested-current" and result.iloc[1].error == "empty_text"
     )
     assert len(requested.merge(result, on="key", validate="one_to_one")) == 2
     assert len(load_classifications(path)) == 4
@@ -244,9 +231,7 @@ def test_flush_observes_a_concurrent_writer(tmp_path: Path) -> None:
             timeout=5,
         )
         assert check.returncode == 0 and check.stdout.strip() == "free"
-        merge_classifications(
-            path, pd.DataFrame([_record(key="SDAX-99", config=config)])
-        )
+        merge_classifications(path, pd.DataFrame([_record(key="SDAX-99", config=config)]))
         return _fake(client, key, text, model)
 
     with patch.object(classifier, "classify_one", side_effect=fake):
@@ -275,9 +260,7 @@ def test_later_duplicate_input_text_controls_the_identity(tmp_path: Path) -> Non
     assert len(result) == 1
     frame.loc[1, ["summary", "description", "comments"]] = ""
     with patch.object(classifier, "build_client", side_effect=AssertionError("client")):
-        invalid = classifier.classify_tickets(
-            frame, path, progress=False, configuration=config
-        )
+        invalid = classifier.classify_tickets(frame, path, progress=False, configuration=config)
     assert len(invalid) == 1 and invalid.iloc[0].error == "empty_text"
 
 

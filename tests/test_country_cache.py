@@ -30,12 +30,8 @@ def _identity() -> AssetIdentity:
 
 def _frame() -> pd.DataFrame:
     tenant = load_settings({}).tenant
-    value = issue(
-        assets_cloud_id=tenant.cloud_id, assets_workspace_id=tenant.workspace_id
-    )
-    value["fields"][desks.FIELDS.contact] = [
-        {"workspaceId": tenant.workspace_id, "objectId": "41"}
-    ]
+    value = issue(assets_cloud_id=tenant.cloud_id, assets_workspace_id=tenant.workspace_id)
+    value["fields"][desks.FIELDS.contact] = [{"workspaceId": tenant.workspace_id, "objectId": "41"}]
     for field in (desks.FIELDS.branch, desks.FIELDS.central):
         value["fields"][field] = []
     frame = load_project_issues("SDEU", [value], country_cache={})
@@ -69,9 +65,7 @@ def test_country_ttl_boundaries_and_force_refresh(tmp_path: Path) -> None:
         force=True,
     )
     assert result.loc[0, "Land"] == "Österreich" and stats["resolved"] == 1
-    assert (
-        updated.entries[identity].country == "Österreich" and resolver.call_count == 1
-    )
+    assert updated.entries[identity].country == "Österreich" and resolver.call_count == 1
 
 
 def test_rerender_never_refreshes_or_overwrites_stored_legacy_country(
@@ -84,9 +78,7 @@ def test_rerender_never_refreshes_or_overwrites_stored_legacy_country(
     path.write_text('{"41":"Unverified cache value"}')
     before = path.read_bytes()
     cache = load_country_cache(path)
-    frame = pd.DataFrame(
-        [{"key": "SDEU-1", "ansprechpartner": "ID_41", "Land": "Stored country"}]
-    )
+    frame = pd.DataFrame([{"key": "SDEU-1", "ansprechpartner": "ID_41", "Land": "Stored country"}])
     fetch = Mock(side_effect=AssertionError("rerender fetched"))
     monkeypatch.setattr(asset_country, "fetch_country_asset", fetch)
     result = asset_country.attach_country(frame, cache)
@@ -110,19 +102,13 @@ def test_failed_refresh_is_not_cached_as_no_country() -> None:
     result, failed_cache, stats = asset_country.refresh_countries(
         _frame(), cache=cache, resolver=resolver, now=lambda: NOW
     )
-    assert (
-        failed_cache.entries[identity] == old
-        and stats["failed"] == 1
-        and stats["stale"] == 1
-    )
+    assert failed_cache.entries[identity] == old and stats["failed"] == 1 and stats["stale"] == 1
     assert result.loc[0, "Land"] == "Deutschland"
     result, recovered, stats = asset_country.refresh_countries(
         _frame(), cache=failed_cache, resolver=resolver, now=lambda: NOW
     )
     assert stats["failed"] == 0 and result.loc[0, "Land"] == "Österreich"
-    assert (
-        recovered.entries[identity].country == "Österreich" and resolver.call_count == 2
-    )
+    assert recovered.entries[identity].country == "Österreich" and resolver.call_count == 2
 
 
 def test_two_country_writers_preserve_newer_entries(tmp_path: Path) -> None:
@@ -214,12 +200,7 @@ def test_country_cache_migration_is_explicit_and_backed_up(tmp_path: Path) -> No
     revision = cache_revision(path)
     assert revision is not None
     expected = ":".join(map(str, revision))
-    assert (
-        main(
-            ["migrate", "--path", str(path), "--apply", "--expected-revision", expected]
-        )
-        == 0
-    )
+    assert main(["migrate", "--path", str(path), "--apply", "--expected-revision", expected]) == 0
     backups = list(tmp_path.glob("*.bak-country-*"))
     assert len(backups) == 1 and backups[0].read_bytes() == before
     current = load_country_cache(path)
@@ -231,9 +212,7 @@ def test_country_cache_migration_is_explicit_and_backed_up(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize("content", ['{"version":99}', '{"version":true}', "not json"])
-def test_unsupported_or_corrupt_country_cache_fails_safely(
-    tmp_path: Path, content: str
-) -> None:
+def test_unsupported_or_corrupt_country_cache_fails_safely(tmp_path: Path, content: str) -> None:
     """Unknown schemas never silently become empty or verified state."""
     from country_cache import CountryCacheError, load_country_cache
 
@@ -248,9 +227,7 @@ def test_explicit_asset_reads_do_not_reuse_process_global_responses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Repeated explicit reads can observe changed remote country values."""
-    fetch = Mock(
-        side_effect=[{"id": "41", "country": "DE"}, {"id": "41", "country": "AT"}]
-    )
+    fetch = Mock(side_effect=[{"id": "41", "country": "DE"}, {"id": "41", "country": "AT"}])
     monkeypatch.setattr(jira_loader, "jira_request", fetch)
     first = jira_loader.fetch_asset_object(object_id="41")
     second = jira_loader.fetch_asset_object(object_id="41")

@@ -47,9 +47,7 @@ def test_retention_is_union_of_newest_ten_and_fourteen_days(tmp_path: Path) -> N
     backups = []
     for days in [*range(20, 32), 14, 3]:
         timestamp = NOW - timedelta(days=days)
-        path = (
-            tmp_path / f"{paths.tickets.name}.bak-import-{timestamp:%Y%m%d-%H%M%S-%f}"
-        )
+        path = tmp_path / f"{paths.tickets.name}.bak-import-{timestamp:%Y%m%d-%H%M%S-%f}"
         path.write_bytes(b"synthetic")
         backups.append(path)
     # Filesystem mtime is deliberately unrelated to the encoded backup time.
@@ -61,9 +59,7 @@ def test_retention_is_union_of_newest_ten_and_fourteen_days(tmp_path: Path) -> N
     assert all(path.exists() == (path not in expected) for path in backups)
 
 
-@pytest.mark.parametrize(
-    "change", ["digest", "new_candidate", "new_inode", "active_import"]
-)
+@pytest.mark.parametrize("change", ["digest", "new_candidate", "new_inode", "active_import"])
 def test_dry_run_and_apply_digest_are_fail_closed(tmp_path: Path, change: str) -> None:
     """Any stale-at-entry plan or active import prevents every deletion."""
     from cache_maintenance import apply_cleanup, plan_cleanup
@@ -131,9 +127,7 @@ def test_partial_logs_unrelated_files_and_symlinks_are_protected(
     assert set(protected + [directory, symlink]) <= set(plan.protected)
     assert apply_cleanup(plan, paths, now=NOW) == (eligible,)
     assert all(path.read_bytes() == b"protected" for path in protected)
-    assert (
-        nested.exists() and outside.read_bytes() == b"outside" and symlink.is_symlink()
-    )
+    assert nested.exists() and outside.read_bytes() == b"outside" and symlink.is_symlink()
 
 
 def test_cleanup_uses_owner_lock_order_and_temp_age(
@@ -202,9 +196,7 @@ def test_busy_family_prevents_any_deletion(tmp_path: Path) -> None:
     from file_io import path_lock
 
     paths = _paths(tmp_path)
-    selected = [
-        _temp(target, timedelta(days=2)) for target in (paths.tickets, paths.countries)
-    ]
+    selected = [_temp(target, timedelta(days=2)) for target in (paths.tickets, paths.countries)]
     entered, release = threading.Event(), threading.Event()
 
     def writer() -> None:
@@ -244,9 +236,7 @@ def test_cleanup_reports_exact_partial_unlink_failure(
 
     monkeypatch.setattr(Path, "unlink", unlink)
     with pytest.raises(maintenance.CleanupError) as caught:
-        maintenance.apply_cleanup(
-            maintenance.plan_cleanup(paths, now=NOW), paths, now=NOW
-        )
+        maintenance.apply_cleanup(maintenance.plan_cleanup(paths, now=NOW), paths, now=NOW)
     assert caught.value.deleted == (one,) and caught.value.failed == (two,)
     assert "SYNTHETIC_PRIVATE_MARKER" not in str(caught.value)
     assert not one.exists() and two.exists()

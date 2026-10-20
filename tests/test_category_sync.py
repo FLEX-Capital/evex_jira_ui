@@ -36,13 +36,9 @@ def references():
     return {
         key: {
             "updated": "2026-09-01T11:00:00Z",
-            "customfield_10680": [
-                {"workspaceId": loader.WORKSPACE_ID, "objectId": "41"}
-            ],
+            "customfield_10680": [{"workspaceId": loader.WORKSPACE_ID, "objectId": "41"}],
             "customfield_10679": (
-                [{"workspaceId": loader.WORKSPACE_ID, "objectId": "42"}]
-                if key == "SDAX-1"
-                else []
+                [{"workspaceId": loader.WORKSPACE_ID, "objectId": "42"}] if key == "SDAX-1" else []
             ),
         }
         for key in ("SDAX-1", "SDAX-2")
@@ -81,9 +77,7 @@ def test_cached_ids_are_verified_and_missing_fields_are_not_assumed_unassigned()
     patches, report = categories.prepare_category_repairs(
         frame(),
         reference_loader=read,
-        resolver=categories.CategoryResolver(
-            fetch=lambda c, w, oid: {"id": oid, "label": oid}
-        ),
+        resolver=categories.CategoryResolver(fetch=lambda c, w, oid: {"id": oid, "label": oid}),
     )
     result, _ = categories.apply_category_repairs(frame(), patches)
     assert set(read.call_args.args[0]) == {"SDAX-1", "SDAX-2"}
@@ -116,9 +110,7 @@ def test_retry_budget_is_shared_across_tickets_and_resets_next_run():
     delays = []
     resolver = categories.CategoryResolver(fetch=fetch, sleep=delays.append)
     for _ in range(5):
-        assert (
-            resolver.resolve(loader.CLOUD_ID, loader.WORKSPACE_ID, "41").label is None
-        )
+        assert resolver.resolve(loader.CLOUD_ID, loader.WORKSPACE_ID, "41").label is None
     assert fetch.call_count == 3
     assert delays == [1, 2]
     fetch.side_effect = None
@@ -151,9 +143,7 @@ def test_http_failures_have_bounded_retries_and_honour_retry_after(status, attem
 def test_transient_failure_recovers_without_restarting_other_enrichment():
     import category_sync as categories
 
-    fetch = Mock(
-        side_effect=[requests.ConnectionError(), {"id": "41", "label": "Recovered"}]
-    )
+    fetch = Mock(side_effect=[requests.ConnectionError(), {"id": "41", "label": "Recovered"}])
     resolver = categories.CategoryResolver(fetch=fetch, sleep=lambda seconds: None)
     raw = {
         "fields": {

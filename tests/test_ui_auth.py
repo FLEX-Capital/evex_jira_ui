@@ -171,15 +171,15 @@ def test_fragment_rotation_blocks_status_and_import_actions(
     monkeypatch.setattr(st, "container", MagicMock())
     for name in ("caption", "subheader", "info", "warning"):
         monkeypatch.setattr(st, name, Mock())
-    monkeypatch.setattr(
-        st, "date_input", Mock(return_value=(date(2025, 1, 1), date(2025, 2, 1)))
-    )
+    monkeypatch.setattr(st, "date_input", Mock(return_value=(date(2025, 1, 1), date(2025, 2, 1))))
     monkeypatch.setattr(st, "multiselect", Mock(return_value=["SDAX"]))
     monkeypatch.setattr(
         st,
         "button",
-        lambda label, **kwargs: (action == "resume" and "fortsetzen" in label)
-        or (action == "start" and "laden" in label),
+        lambda label, **kwargs: (
+            (action == "resume" and "fortsetzen" in label)
+            or (action == "start" and "laden" in label)
+        ),
     )
     # Call the actual fragment body, deliberately bypassing app.py's full gate.
     # AppTest.run() itself only simulates whole-app reruns.

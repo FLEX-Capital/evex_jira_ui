@@ -17,6 +17,7 @@ from service_desks import BY_KEY, as_utc, berlin_day_end, berlin_day_start
 
 
 def parse_args(argv=None):
+    """Parse the supported project, Berlin date-window and checkpoint CLI options."""
     ap = argparse.ArgumentParser(description=__doc__)
     window = ap.add_mutually_exclusive_group()
     window.add_argument("--days", type=int, help="how far back to fetch (default: 365)")
@@ -52,30 +53,31 @@ def parse_args(argv=None):
 
 
 def main(argv=None):
+    """Run the shared Jira import and report safe completion or failure counts."""
     args = parse_args(argv)
     end = as_utc(berlin_day_end(args.end)) if args.end else datetime.now(UTC)
-    start = (
-        berlin_day_start(args.start)
-        if args.start
-        else end - timedelta(days=args.days or 365)
-    )
+    start = berlin_day_start(args.start) if args.start else end - timedelta(days=args.days or 365)
     try:
         request = make_sync_request(start, end, args.project, resume=args.resume)
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
     print(
-        f"Importing {', '.join(request.projects)} ({request.start.isoformat()} -> {request.end.isoformat()})",
+        (
+            f"Importing {', '.join(request.projects)} "
+            f"({request.start.isoformat()} -> {request.end.isoformat()})"
+        ),
         flush=True,
     )
     if args.resume:
         print(
-            "Resume reuses compatible raw checkpoints; older checkpointed tickets are not fetched freshly.",
+            (
+                "Resume reuses compatible raw checkpoints; older checkpointed "
+                "tickets are not fetched freshly."
+            ),
             flush=True,
         )
     try:
-        report = run_sync(
-            request, progress=lambda event: print(event["message"], flush=True)
-        )
+        report = run_sync(request, progress=lambda event: print(event["message"], flush=True))
     except ImportBusyError as exc:
         print(str(exc), flush=True)
         return 1
@@ -84,13 +86,16 @@ def main(argv=None):
             print(f"{project}: failed: {report.errors[project]}")
         else:
             print(
-                f"{project}: {report.counts.get(project, 0)} tickets; {report.asset_failures.get(project, 0)} Assets warnings"
+                f"{project}: {report.counts.get(project, 0)} tickets; "
+                f"{report.asset_failures.get(project, 0)} Assets warnings"
             )
     categories = report.categories
     print(f"Cache: {report.rows} rows; protected: {report.protected_rows}")
     print(
-        f"Categories: {categories.repaired_cells} repaired, {categories.unassigned_cells} unassigned, "
-        f"{categories.unresolved_cells} unresolved, {len(categories.failed_objects)} failed references/objects, "
+        f"Categories: {categories.repaired_cells} repaired, "
+        f"{categories.unassigned_cells} unassigned, "
+        f"{categories.unresolved_cells} unresolved, "
+        f"{len(categories.failed_objects)} failed references/objects, "
         f"{categories.skipped_cells} concurrent patches skipped"
     )
     for name in ("save_error", "source_error", "raw_error"):

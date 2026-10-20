@@ -47,9 +47,7 @@ def test_each_configured_desk_has_one_transformation_policy(storage: Path) -> No
             desk.comment_separator,
         ) == (company, clone, second, separator)
         values = [issue(key=f"{key}-1", main_id=None, sub_id=None)]
-        pd.testing.assert_frame_equal(
-            transform.load_project_issues(key, values), adapter(values)
-        )
+        pd.testing.assert_frame_equal(transform.load_project_issues(key, values), adapter(values))
     assert desks.BY_KEY["SDEU"].project_id == "12521"
     assert desks.BY_KEY["SDEU"].service_desk_id == "219"
 
@@ -60,9 +58,7 @@ def test_field_mapping_drives_fetch_trim_transform_and_repair(
     """A replaced field map drives all paths without borrowing old field values."""
     import source_sync
 
-    fields = replace(
-        desks.FIELDS, main_category="customfield_99990", source="customfield_99991"
-    )
+    fields = replace(desks.FIELDS, main_category="customfield_99990", source="customfield_99991")
     monkeypatch.setattr(desks, "FIELDS", fields)
     value = issue(main_id="41", sub_id=None)
     value["fields"][fields.main_category] = value["fields"].pop("customfield_10680")
@@ -72,9 +68,7 @@ def test_field_mapping_drives_fetch_trim_transform_and_repair(
     assert fields.main_category in trimmed["fields"]
     assert "customfield_10680" not in fields.retained()
     assert "status" in fields.retained() and "updated" in fields.retained()
-    resolver = CategoryResolver(
-        fetch=lambda *a: {"id": "41", "label": "Mapped category"}
-    )
+    resolver = CategoryResolver(fetch=lambda *a: {"id": "41", "label": "Mapped category"})
     enriched = jira_loader.enrich_issue_assets(trimmed, category_resolver=resolver)
     frame = transform.load_project_issues("SDEU", [enriched])
     assert frame.loc[0, "Hauptkategorie"] == "Mapped category"
@@ -85,13 +79,9 @@ def test_field_mapping_drives_fetch_trim_transform_and_repair(
     )
     assert report.repaired_cells == 1
     assert any(p.label == "Mapped category" and p.reference_id == "41" for p in patches)
-    fetch = Mock(
-        return_value={value["key"]: {fields.source: {"value": "Mapped source"}}}
-    )
+    fetch = Mock(return_value={value["key"]: {fields.source: {"value": "Mapped source"}}})
     monkeypatch.setattr(source_sync, "fetch_issue_fields", fetch)
-    assert source_sync.fetch_issue_sources([value["key"]]) == {
-        value["key"]: "Mapped source"
-    }
+    assert source_sync.fetch_issue_sources([value["key"]]) == {value["key"]: "Mapped source"}
     assert fetch.call_args.args[1] == [fields.source]
 
 
@@ -153,16 +143,12 @@ def test_legacy_caches_cannot_be_relabelled_as_another_tenant(
     with pytest.raises(SettingsError, match="tenant"):
         data_loading.load_data()
     countries = asset_country.load_cache()
-    assert not countries.entries and countries.legacy_unverified == {
-        "41": "Deutschland"
-    }
+    assert not countries.entries and countries.legacy_unverified == {"41": "Deutschland"}
     assert country.read_bytes() == original
     # Explicit metadata publication remains unverified under every tenant.
     countries = asset_country.save_cache({"41": "Österreich"})
     assert not countries.entries and countries.legacy_unverified == {"41": "Österreich"}
-    assert any(
-        path.read_bytes() == original for path in tmp_path.glob("*.bak-country-*")
-    )
+    assert any(path.read_bytes() == original for path in tmp_path.glob("*.bak-country-*"))
     separate = tmp_path / "new-tenant.pkl"
     data_loading.save_data(pd.DataFrame([{"key": "SDAX-2"}]), path=separate)
     assert data_loading.load_data(path=separate).key.tolist() == ["SDAX-2"]

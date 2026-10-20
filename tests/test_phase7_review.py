@@ -31,12 +31,8 @@ def test_notebook_validation_uses_exact_typed_outward_clones(
     if links is None:
         frame.at[0, "issue_links"] = None
         frame.at[0, "clone_in_project"] = "EXAX"
-    frame["resolution_bucket"] = pd.Categorical(
-        ["support_todo"], categories=["support_todo"]
-    )
+    frame["resolution_bucket"] = pd.Categorical(["support_todo"], categories=["support_todo"])
     frame["confidence"] = 0.9
-    exec(
-        _cell("13840be3"), {"labelled": frame, "pd": pd, "display": lambda *args: None}
-    )
+    exec(_cell("13840be3"), {"labelled": frame, "pd": pd, "display": lambda *args: None})
     actual = frame.cloned_to_dev.iloc[0]
     assert pd.isna(actual) if expected is None else bool(actual) is expected

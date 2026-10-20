@@ -21,9 +21,7 @@ from settings import DEFAULT_TENANT, TENANT_ATTR, Settings, load_settings
 def get_jira(settings: Settings | None = None) -> JIRA:
     """Create a Jira client from the current requested-operation settings."""
     connection = (settings or load_settings()).require_jira()
-    return JIRA(
-        server=connection.url, basic_auth=(connection.username, connection.password)
-    )
+    return JIRA(server=connection.url, basic_auth=(connection.username, connection.password))
 
 
 # read json from data/jira-servicedesk-schema-objects.json
@@ -76,9 +74,7 @@ def enrich_jira_time_metrics(
     ).total_seconds() / 3600
     if window_hours <= 0:
         raise ValueError("Business end must be after business start")
-    band_hours = (
-        window_hours if hours_per_working_day is None else hours_per_working_day
-    )
+    band_hours = window_hours if hours_per_working_day is None else hours_per_working_day
     for column in (created_col, updated_col, status_date_col):
         values = out.get(column, pd.Series(index=out.index, dtype="object"))
         out[column] = pd.to_datetime(
@@ -95,9 +91,7 @@ def enrich_jira_time_metrics(
         index=out.index,
         dtype="string",
     )
-    out["is_done"] = (
-        out["completion_state"].map({"done": True, "open": False}).astype("boolean")
-    )
+    out["is_done"] = out["completion_state"].map({"done": True, "open": False}).astype("boolean")
     done = out["completion_state"].eq("done")
     out["resolved_at"] = out[status_date_col].where(done, pd.NaT)
     endpoints = out[created_col].notna() & out["resolved_at"].notna()
@@ -118,9 +112,7 @@ def enrich_jira_time_metrics(
         .astype("float64")
     )
     out["resolution"] = "Not done"
-    out.loc[out["completion_state"].eq("unknown"), "resolution"] = (
-        "Unbekannter Abschlussstatus"
-    )
+    out.loc[out["completion_state"].eq("unknown"), "resolution"] = "Unbekannter Abschlussstatus"
     out.loc[done & ~valid, "resolution"] = "Unbekannte Dauer"
     out.loc[valid, "resolution"] = np.where(
         out.loc[valid, "time_to_resolution_calendar_days"] < 1, "Same day", "> 1 day"
@@ -130,9 +122,7 @@ def enrich_jira_time_metrics(
     min_year = int(years.min()) if not years.empty else pd.Timestamp.now(tz=tz).year
     max_year = int(years.max()) if not years.empty else min_year
     calendar = holidays.Germany(years=range(min_year, max_year + 1), subdiv=subdiv)
-    holiday_dates = np.array(
-        [np.datetime64(day) for day in calendar], dtype="datetime64[D]"
-    )
+    holiday_dates = np.array([np.datetime64(day) for day in calendar], dtype="datetime64[D]")
 
     def business_hours(start: pd.Timestamp, end: pd.Timestamp) -> float:
         total = 0.0
@@ -148,16 +138,12 @@ def enrich_jira_time_metrics(
     out["time_to_resolution_biz_hours"] = pd.Series(
         [
             business_hours(start, end) if good else np.nan
-            for start, end, good in zip(
-                out[created_col], out["resolved_at"], valid, strict=True
-            )
+            for start, end, good in zip(out[created_col], out["resolved_at"], valid, strict=True)
         ],
         index=out.index,
         dtype="float64",
     )
-    out["time_to_resolution_biz_days"] = (
-        out["time_to_resolution_biz_hours"] / window_hours
-    )
+    out["time_to_resolution_biz_days"] = out["time_to_resolution_biz_hours"] / window_hours
     out["resolution_band"] = classify_bands(
         out["time_to_resolution_biz_hours"],
         out["is_done"],
@@ -168,13 +154,9 @@ def enrich_jira_time_metrics(
     duration_labels = pd.cut(
         out["time_to_resolution_h"], bins=bins, labels=labels, include_lowest=True
     ).astype("string")
-    duration_labels = duration_labels.mask(
-        out["time_to_resolution_h"] > bins[-1], overflow_label
-    )
+    duration_labels = duration_labels.mask(out["time_to_resolution_h"] > bins[-1], overflow_label)
     duration_labels = duration_labels.fillna("Unbekannte Dauer")
-    duration_labels = duration_labels.mask(
-        out["completion_state"] == "open", "Nicht abgeschlossen"
-    )
+    duration_labels = duration_labels.mask(out["completion_state"] == "open", "Nicht abgeschlossen")
     duration_labels = duration_labels.mask(
         out["completion_state"] == "unknown", "Unbekannter Abschlussstatus"
     )
@@ -194,11 +176,7 @@ def enrich_jira_time_metrics(
         (updated_col, "business_days_created_to_updated"),
         ("resolved_at", "business_days_created_to_resolved"),
     ]:
-        mask = (
-            out[created_col].notna()
-            & out[target].notna()
-            & (out[target] >= out[created_col])
-        )
+        mask = out[created_col].notna() & out[target].notna() & (out[target] >= out[created_col])
         out[metric] = np.nan
         target_days = out[target].dt.tz_localize(None).to_numpy(dtype="datetime64[D]")
         out.loc[mask, metric] = np.busday_count(
@@ -245,13 +223,9 @@ def load_clones(
 ) -> tuple[str, str, int, Any, Any]:
     """Preserve generic outward-link compatibility from explicit evidence."""
     outward = [
-        link
-        for link in parse_issue_links(links, deduplicate=False)
-        if link.direction == "outward"
+        link for link in parse_issue_links(links, deduplicate=False) if link.direction == "outward"
     ]
-    further = [
-        load_clone_of_clone(link.target_key, link_graph=link_graph) for link in outward
-    ]
+    further = [load_clone_of_clone(link.target_key, link_graph=link_graph) for link in outward]
     unknown = any(pd.isna(keys) for keys, _ in further)
     keys = ",".join(str(keys) for keys, _ in further if not pd.isna(keys))
     types = ",".join(str(types) for _, types in further if not pd.isna(types))
@@ -328,8 +302,7 @@ def _asset_label(issue, field_name, *, settings=None):
     fields = issue.get("fields") or {}
     object_id = _asset_id(fields, field_name)
     normal_marker = any(
-        name in issue
-        for name in ("asset_labels", "assets_workspace_id", "assets_cloud_id")
+        name in issue for name in ("asset_labels", "assets_workspace_id", "assets_cloud_id")
     )
     if normal_marker and object_id:
         reference = fields[field_name][0]
@@ -363,8 +336,8 @@ def _extract_issue(issue, comment_separator, *, settings=None, link_graph=None):
     normalized = parse_issue_links(links)
     clones_only = clone_links(normalized)
     if links:
-        clones, clone_types, n_clones, clones_of_clones, clone_types_of_clones = (
-            load_clones(links, link_graph=link_graph)
+        clones, clone_types, n_clones, clones_of_clones, clone_types_of_clones = load_clones(
+            links, link_graph=link_graph
         )
     else:
         clones = clone_types = clones_of_clones = clone_types_of_clones = ""
@@ -372,9 +345,7 @@ def _extract_issue(issue, comment_separator, *, settings=None, link_graph=None):
 
     comments = _nested(fields, "comment", "comments", default=[]) or []
     comment_text = comment_separator.join(
-        str(comment.get("body", ""))
-        for comment in comments
-        if isinstance(comment, dict)
+        str(comment.get("body", "")) for comment in comments if isinstance(comment, dict)
     )
     main_id = _asset_id(fields, desks.FIELDS.main_category)
     sub_id = _asset_id(fields, desks.FIELDS.sub_category)
@@ -396,9 +367,7 @@ def _extract_issue(issue, comment_separator, *, settings=None, link_graph=None):
         "issuetype": _nested(fields, "issuetype", "name"),
         "main_category_id": main_id,
         "sub_category_id": sub_id,
-        "currentstatus_name": _nested(
-            fields, desks.FIELDS.request, "currentStatus", "status"
-        ),
+        "currentstatus_name": _nested(fields, desks.FIELDS.request, "currentStatus", "status"),
         "currentstatus_date": _nested(
             fields, desks.FIELDS.request, "currentStatus", "statusDate", "jira"
         ),
@@ -428,12 +397,8 @@ def _extract_issue(issue, comment_separator, *, settings=None, link_graph=None):
             if link.direction == "outward"
         ),
         "clone_types_of_clones": clone_types_of_clones,
-        "Hauptkategorie": _asset_label(
-            issue, desks.FIELDS.main_category, settings=config
-        ),
-        "Unterkategorie": _asset_label(
-            issue, desks.FIELDS.sub_category, settings=config
-        ),
+        "Hauptkategorie": _asset_label(issue, desks.FIELDS.main_category, settings=config),
+        "Unterkategorie": _asset_label(issue, desks.FIELDS.sub_category, settings=config),
     }
 
 
@@ -481,14 +446,10 @@ def _load_service_desk_issues(
     df = attach_country(df, country_cache, settings=config)
     df["firma"] = firma
     df["clone_in_project"] = df["clones"].apply(
-        lambda value: (
-            ",".join(key.split("-")[0] for key in value.split(",")) if value else "-"
-        )
+        lambda value: ",".join(key.split("-")[0] for key in value.split(",")) if value else "-"
     )
     df["has_exax_clone"] = (
-        df["clone_in_project"].str.contains(clone_project, regex=False)
-        if clone_project
-        else False
+        df["clone_in_project"].str.contains(clone_project, regex=False) if clone_project else False
     )
     df["has_axt_clone_clone"] = (
         df["clones_of_clones"].str.contains(clone_of_clone_project, regex=False)
@@ -496,9 +457,9 @@ def _load_service_desk_issues(
         else False
     )
     if clone_of_clone_project:
-        no_evidence = ~df["link_enrichment_complete"].astype("boolean").fillna(
-            False
-        ) & ~df["has_axt_clone_clone"].astype("boolean").fillna(False)
+        no_evidence = ~df["link_enrichment_complete"].astype("boolean").fillna(False) & ~df[
+            "has_axt_clone_clone"
+        ].astype("boolean").fillna(False)
         df["has_axt_clone_clone"] = (
             df["has_axt_clone_clone"].astype("boolean").mask(no_evidence, pd.NA)
         )
@@ -525,7 +486,7 @@ def load_issues(
     )
 
 
-def load_issues_Amparex(
+def load_issues_Amparex(  # noqa: N802 - retained public desk adapter
     issues: list[dict[str, Any]] | None,
     *,
     country_cache: CountryCache | Mapping[str, str | None] | None = None,
@@ -542,7 +503,7 @@ def load_issues_Amparex(
     )
 
 
-def load_issues_Euronet(
+def load_issues_Euronet(  # noqa: N802 - retained public desk adapter
     issues: list[dict[str, Any]] | None,
     *,
     country_cache: CountryCache | Mapping[str, str | None] | None = None,
@@ -596,6 +557,7 @@ def _normalize_bool_columns(df):
 
 
 def upsert_jira_data(df_old, df_new, key_col="key"):
+    """Merge normalized tickets by key, preserving prior compatible enrichment."""
     from cache_schema import SCHEMA_ATTR, normalize_frame
 
     for source in (df_old, df_new):

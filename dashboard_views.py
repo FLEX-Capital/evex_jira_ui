@@ -42,9 +42,7 @@ class DashboardContext:
     plot_width: int = 1500
 
 
-def _mode(
-    key: str, *, allow_log: bool = False
-) -> Literal["absolute", "relative", "log"]:
+def _mode(key: str, *, allow_log: bool = False) -> Literal["absolute", "relative", "log"]:
     choice = st.radio(
         "Ansicht wählen:",
         [MODE_ABS, MODE_LOG, MODE_REL] if allow_log else [MODE_ABS, MODE_REL],
@@ -52,16 +50,10 @@ def _mode(
         index=0,
         key=key,
     )
-    return (
-        "relative"
-        if choice == MODE_REL
-        else "log" if choice == MODE_LOG else "absolute"
-    )
+    return "relative" if choice == MODE_REL else "log" if choice == MODE_LOG else "absolute"
 
 
-def _show(
-    context: DashboardContext, figure: go.Figure, x_label: str | None = None
-) -> None:
+def _show(context: DashboardContext, figure: go.Figure, x_label: str | None = None) -> None:
     figure.update_layout(height=context.plot_height)
     figure.update_xaxes(title_text=x_label or context.x_label)
     st.plotly_chart(figure, height=context.plot_height, width=context.plot_width)
@@ -150,9 +142,7 @@ def render_countries(context: DashboardContext) -> None:
             "Länder-Cache konnte nicht gelesen werden. "
             "Bitte Format prüfen oder Sicherung wiederherstellen."
         )
-    missing = [
-        column for column in ("Land", "resolution_band") if column not in context.frame
-    ]
+    missing = [column for column in ("Land", "resolution_band") if column not in context.frame]
     if missing:
         st.info(
             f"Länderdaten fehlen (Spalten: {', '.join(missing)}). "
@@ -241,9 +231,7 @@ def render_customers(context: DashboardContext) -> None:
     frame = context.frame.loc[context.frame["completion_state"] == "done"].assign(
         _chart_group="Abgeschlossen"
     )
-    data = prepare_chart_data(
-        frame, x="zentrale", group="_chart_group", sort_x_by_total=True
-    )
+    data = prepare_chart_data(frame, x="zentrale", group="_chart_group", sort_x_by_total=True)
     top = data.x_order[:25]
     totals = {key: data.totals[key] for key in top}
     data = ChartData(
@@ -272,14 +260,10 @@ def render_clones(context: DashboardContext) -> None:
     projects = []
     for _, row in members.iterrows():
         keys = [*row["clone_inward_keys"], *row["clone_outward_keys"]]
-        projects.append(
-            list(dict.fromkeys(key.rsplit("-", 1)[0] for key in keys)) or ["-"]
-        )
+        projects.append(list(dict.fromkeys(key.rsplit("-", 1)[0] for key in keys)) or ["-"])
     members["clone_in_project"] = pd.Series(projects, index=members.index, dtype=object)
     members = members.explode("clone_in_project")
-    st.caption(
-        f"Basis: {len(members)} Projektmitgliedschaften aus {int(known.sum())} Tickets."
-    )
+    st.caption(f"Basis: {len(members)} Projektmitgliedschaften aus {int(known.sum())} Tickets.")
     data = prepare_chart_data(
         members.assign(_chart_group="Projektmitgliedschaften"),
         x="clone_in_project",
@@ -306,9 +290,7 @@ def render_raw(context: DashboardContext) -> None:
     st.dataframe(
         _link_first(context.frame),
         column_config={
-            "Link": st.column_config.LinkColumn(
-                "JIRA Link", display_text="Open in JIRA"
-            )
+            "Link": st.column_config.LinkColumn("JIRA Link", display_text="Open in JIRA")
         },
         hide_index=True,
         height=context.plot_height,
@@ -362,8 +344,6 @@ def render_dashboard(context: DashboardContext) -> None:
         ("📄 Interaktiv", render_interactive_view),
     ]
     with st.container(key="dashboard"):
-        for tab, (_, renderer) in zip(
-            st.tabs([label for label, _ in views]), views, strict=True
-        ):
+        for tab, (_, renderer) in zip(st.tabs([label for label, _ in views]), views, strict=True):
             with tab:
                 renderer(context)

@@ -149,9 +149,7 @@ def test_failed_optional_maintenance_has_safe_actionable_feedback(
             "from maintenance_ui import render_maintenance\nfrom settings import load_settings\n"
             "render_maintenance(load_settings())"
         ).run()
-        next(
-            button for button in app.button if "Ursprung" in button.label
-        ).click().run()
+        next(button for button in app.button if "Ursprung" in button.label).click().run()
     assert not app.exception and not app.success
     assert any("permission" in error.value for error in app.error)
     rendered = " ".join(element.value for element in [*app.error, *app.caption])
@@ -166,8 +164,7 @@ def test_empty_state_keeps_custom_import_controls(public_ui: None) -> None:
 
     assert callable(render_import_empty_state)
     app = AppTest.from_string(
-        "from maintenance_ui import render_import_empty_state\n"
-        "render_import_empty_state('No data')"
+        "from maintenance_ui import render_import_empty_state\nrender_import_empty_state('No data')"
     ).run()
     assert not app.exception and any(info.value == "No data" for info in app.info)
     assert app.date_input(key="temporary_history_dates")
@@ -207,8 +204,7 @@ def test_incomplete_country_outcome_shows_counts_and_safe_cause(
     warnings = " ".join(warning.value for warning in app.warning)
     assert "2 Asset" in warnings and "3 Tickets" in warnings
     assert any(
-        "1 Assets" in success.value and "4 Tickets" in success.value
-        for success in app.success
+        "1 Assets" in success.value and "4 Tickets" in success.value for success in app.success
     )
     assert any(
         "synthetic-run" in caption.value and "connection" in caption.value

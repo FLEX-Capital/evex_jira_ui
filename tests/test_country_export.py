@@ -49,9 +49,7 @@ def test_export_default_today_is_capped_at_invocation() -> None:
     now = datetime(2026, 10, 20, 12, 34, 56, tzinfo=UTC)
     with patch.object(exporter, "fetch_jira_issues", return_value=[]) as fetch:
         assert (
-            exporter.load_issues(
-                "unused", True, "SDAX", "2025-01-01", None, 100, now=lambda: now
-            )
+            exporter.load_issues("unused", True, "SDAX", "2025-01-01", None, 100, now=lambda: now)
             == []
         )
     assert fetch.call_args.args[1] == now
@@ -66,9 +64,7 @@ def test_export_empty_selection_and_publication_failure(
 
     source, output = tmp_path / "issues.json", tmp_path / "countries.xlsx"
     source.write_text("[]")
-    with patch.object(
-        exporter, "_fetch_asset_with_retry", side_effect=AssertionError("network")
-    ):
+    with patch.object(exporter, "_fetch_asset_with_retry", side_effect=AssertionError("network")):
         assert exporter.main(["--input", str(source), "--output", str(output)]) == 0
     assert pd.read_excel(output).columns.tolist() == ["Jira Issue ID", "Country"]
     before = output.read_bytes()
@@ -111,12 +107,8 @@ def test_export_failure_can_recover_and_returns_nonzero(
     record: dict[str, Any] = {
         "key": "SDAX-1",
         "fields": {
-            "customfield_10689": [
-                {"workspaceId": tenant.workspace_id, "objectId": "1"}
-            ],
-            "customfield_10674": [
-                {"workspaceId": tenant.workspace_id, "objectId": "2"}
-            ],
+            "customfield_10689": [{"workspaceId": tenant.workspace_id, "objectId": "1"}],
+            "customfield_10674": [{"workspaceId": tenant.workspace_id, "objectId": "2"}],
         },
     }
     source, output = tmp_path / "issues.json", tmp_path / "countries.xlsx"
@@ -155,9 +147,7 @@ def test_country_adapters_agree_and_keep_workbook_contract(kind: str) -> None:
     refs = [{"workspaceId": tenant.workspace_id, "objectId": "1"}]
     record: dict[str, Any] = {"key": "SDAX-1", "fields": {"customfield_10689": refs}}
     if kind == "modern":
-        record.update(
-            assets_cloud_id=tenant.cloud_id, assets_workspace_id=tenant.workspace_id
-        )
+        record.update(assets_cloud_id=tenant.cloud_id, assets_workspace_id=tenant.workspace_id)
     elif kind == "legacy":
         refs[0].pop("workspaceId")
     else:
@@ -177,9 +167,7 @@ def test_country_adapters_agree_and_keep_workbook_contract(kind: str) -> None:
         }
     )
     frame = load_project_issues("SDAX", [record], country_cache=cache)
-    displayed = (
-        asset_country.attach_country(frame, cache, allow_legacy=True).iloc[0].Land
-    )
+    displayed = asset_country.attach_country(frame, cache, allow_legacy=True).iloc[0].Land
     with patch.object(
         exporter,
         "_fetch_asset_with_retry",
@@ -198,16 +186,12 @@ class CountryExportTests(unittest.TestCase):
         issues = [
             {
                 "key": "SDEU-1",
-                "fields": {
-                    "customfield_10673": [{"workspaceId": "sandbox", "objectId": "1"}]
-                },
+                "fields": {"customfield_10673": [{"workspaceId": "sandbox", "objectId": "1"}]},
             },
             {
                 "key": "SDAX-2",
                 "fields": {
-                    "customfield_10673": [
-                        {"workspaceId": exporter.WORKSPACE_ID, "objectId": "2"}
-                    ]
+                    "customfield_10673": [{"workspaceId": exporter.WORKSPACE_ID, "objectId": "2"}]
                 },
             },
         ]
@@ -230,9 +214,7 @@ class CountryExportTests(unittest.TestCase):
 
     def test_fetch_uses_normal_cloud_workspace_and_verifies_identity(self):
         with (
-            patch.object(
-                exporter, "fetch_asset_object", return_value={"id": "other"}
-            ) as fetch,
+            patch.object(exporter, "fetch_asset_object", return_value={"id": "other"}) as fetch,
             self.assertRaises(ValueError),
         ):
             exporter._fetch_asset_with_retry("2")

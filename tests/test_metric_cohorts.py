@@ -22,15 +22,11 @@ def _frame() -> pd.DataFrame:
             {
                 "key": f"SDAX-{index}",
                 "created": start,
-                "currentstatus_date": (
-                    None if hours is None else start + timedelta(hours=hours)
-                ),
+                "currentstatus_date": (None if hours is None else start + timedelta(hours=hours)),
                 "status_category_key": (
                     "done" if index < 6 else "new" if index == 6 else "unsupported"
                 ),
-                "currentstatus_name": (
-                    "Fertig" if index >= 6 else "Localized different label"
-                ),
+                "currentstatus_name": ("Fertig" if index >= 6 else "Localized different label"),
                 "firma": None,
                 "request_type": None,
                 "source": None,
@@ -42,9 +38,7 @@ def _frame() -> pd.DataFrame:
 
 
 def _bar_total(fig: go.Figure) -> int:
-    return sum(
-        int(value) for trace in fig.data if trace.type == "bar" for value in trace.y
-    )
+    return sum(int(value) for trace in fig.data if trace.type == "bar" for value in trace.y)
 
 
 def test_duration_figures_account_for_504_overflow_and_unknown() -> None:
@@ -95,9 +89,7 @@ def test_missing_group_labels_do_not_drop_duration_rows() -> None:
         assert fig.layout.yaxis.range[1] >= 1
 
 
-def test_status_customer_country_views_share_completion(
-    storage: Path, public_ui: None
-) -> None:
+def test_status_customer_country_views_share_completion(storage: Path, public_ui: None) -> None:
     """Stable status keys agree across views, including an old in-memory frame."""
     raws = []
     for index, key in enumerate(["done", "new", "unsupported"], 1):

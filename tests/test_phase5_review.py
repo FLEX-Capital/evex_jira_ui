@@ -124,9 +124,7 @@ def test_explicit_config_rejects_conflicting_real_client_before_cache_access(
         "deployment": "other",
     }
     try:
-        with patch.object(
-            classifier, "load_cache", side_effect=AssertionError("read")
-        ) as read:
+        with patch.object(classifier, "load_cache", side_effect=AssertionError("read")) as read:
             with pytest.raises(ValueError, match="conflicting_client_configuration"):
                 classifier.classify_tickets(
                     make_frame(["SDAX-1"]),
@@ -163,9 +161,7 @@ def test_stale_executable_configuration_is_rejected_before_reuse(
         constant,
         original + 1 if isinstance(original, int) else original + " changed",
     )
-    with patch.object(
-        classifier, "load_cache", side_effect=AssertionError("read")
-    ) as read:
+    with patch.object(classifier, "load_cache", side_effect=AssertionError("read")) as read:
         with pytest.raises(ValueError, match="stale_implementation_configuration"):
             classifier.classify_tickets(
                 make_frame(["SDAX-1"]),
@@ -216,30 +212,20 @@ def test_malformed_unsized_or_unicode_cells_do_not_abort_valid_neighbors(
     frame = make_frame(["SDAX-1", "SDAX-2"])
     frame.at[0, "summary"] = bad
     path = tmp_path / "cache.parquet"
-    with patch.object(
-        classifier, "classify_one", side_effect=fake_classification
-    ) as call:
-        result = classifier.classify_tickets(
-            frame, path, client=object(), progress=False
-        )
+    with patch.object(classifier, "classify_one", side_effect=fake_classification) as call:
+        result = classifier.classify_tickets(frame, path, client=object(), progress=False)
     assert call.call_count == 1 and call.call_args.args[1] == "SDAX-2"
     assert result.loc[result.key == "SDAX-1", "error"].iloc[0] == "invalid_text"
     assert load_classifications(path).key.tolist() == ["SDAX-2"]
-    assert result.attrs["classification_errors"] == [
-        {"index": 0, "code": "invalid_text"}
-    ]
+    assert result.attrs["classification_errors"] == [{"index": 0, "code": "invalid_text"}]
 
 
 def test_invalid_unicode_key_is_only_a_positional_error(tmp_path: Path) -> None:
     """Unencodable keys never reach parquet or prevent a valid neighboring key."""
     frame = make_frame(["SDAX-\ud800", "SDAX-2"])
-    with patch.object(
-        classifier, "classify_one", side_effect=fake_classification
-    ) as call:
+    with patch.object(classifier, "classify_one", side_effect=fake_classification) as call:
         result = classifier.classify_tickets(
             frame, tmp_path / "cache.parquet", client=object(), progress=False
         )
     assert result.key.tolist() == ["SDAX-2"] and call.call_count == 1
-    assert result.attrs["classification_errors"] == [
-        {"index": 0, "code": "invalid_key"}
-    ]
+    assert result.attrs["classification_errors"] == [{"index": 0, "code": "invalid_key"}]

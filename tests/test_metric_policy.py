@@ -22,9 +22,7 @@ from data_transformation import enrich_jira_time_metrics
         ("unexpected", "Fertig", "unknown"),
     ],
 )
-def test_status_key_overrides_localized_labels(
-    key: object, status: object, expected: str
-) -> None:
+def test_status_key_overrides_localized_labels(key: object, status: object, expected: str) -> None:
     """Stable category identity wins over localized or conflicting labels."""
     from reporting_policy import completion_state
 

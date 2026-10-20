@@ -297,9 +297,7 @@ class DeploymentResolutionTests(unittest.TestCase):
     def test_env_set_after_import_is_still_seen(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(ticket_classifier.resolve_deployment(), "")
-        with patch.dict(
-            os.environ, {"AZURE_OPENAI_DEPLOYMENT_NAME": "later"}, clear=True
-        ):
+        with patch.dict(os.environ, {"AZURE_OPENAI_DEPLOYMENT_NAME": "later"}, clear=True):
             self.assertEqual(ticket_classifier.resolve_deployment(), "later")
 
 

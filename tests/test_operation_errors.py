@@ -33,9 +33,7 @@ def test_diagnostics_do_not_serialize_payload_or_credentials() -> None:
     assert unknown.code == "unexpected"
 
 
-def test_saved_import_diagnostic_is_safe(
-    storage: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_saved_import_diagnostic_is_safe(storage: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Per-desk and outer failures persist safe causes without private messages."""
     import desk_sync
     import sync_checkpoints

@@ -24,9 +24,7 @@ def test_clone_filter_ignores_blocks_and_keeps_both_directions() -> None:
         ("outward", "AX-3"),
         ("outward", "AX-2"),
     ]
-    assert [x.target_key for x in clone_links(links, type_names=("Blocks",))] == [
-        "AX-1"
-    ]
+    assert [x.target_key for x in clone_links(links, type_names=("Blocks",))] == ["AX-1"]
 
 
 def test_invalid_relationships_are_ignored_without_crashing() -> None:
@@ -99,6 +97,4 @@ def test_legacy_clone_data_is_excluded_in_view(public_ui: None) -> None:
             (pd.Timestamp("2026-09-01").date(), pd.Timestamp("2026-09-10").date())
         ).run()
     assert not app.exception
-    assert any(
-        "1 Tickets" in c.value and "Beziehungsdaten" in c.value for c in app.caption
-    )
+    assert any("1 Tickets" in c.value and "Beziehungsdaten" in c.value for c in app.caption)

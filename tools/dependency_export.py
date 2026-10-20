@@ -30,9 +30,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
-    parser.add_argument(
-        "--output", type=Path, default=ROOT / "requirements.runtime.txt"
-    )
+    parser.add_argument("--output", type=Path, default=ROOT / "requirements.runtime.txt")
     args = parser.parse_args(argv)
     try:
         # No user-controlled arguments or shell expansion enter this command.
@@ -44,9 +42,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         if args.check:
             if not args.output.is_file() or args.output.read_bytes() != result.stdout:
-                print(
-                    "Runtime export differs; regenerate with tools/dependency_export.py."
-                )
+                print("Runtime export differs; regenerate with tools/dependency_export.py.")
                 return 1
             return 0
         args.output.parent.mkdir(parents=True, exist_ok=True)

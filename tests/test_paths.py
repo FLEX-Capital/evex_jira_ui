@@ -58,10 +58,9 @@ def test_every_default_artifact_and_sidecar_shares_the_root(
     assert Path(f"{paths.tickets}.lock").exists()
     assert Path(f"{paths.tickets}.import.lock").exists()
     asset_country.save_cache({"1": "Deutschland"})
-    assert (
-        paths.countries.exists()
-        and asset_country.load_cache().legacy_unverified == {"1": "Deutschland"}
-    )
+    assert paths.countries.exists() and asset_country.load_cache().legacy_unverified == {
+        "1": "Deutschland"
+    }
     ticket_classifier.save_cache(frame)
     assert paths.classifications.exists()
     client = Mock()

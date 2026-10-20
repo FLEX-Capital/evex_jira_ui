@@ -14,9 +14,7 @@ def _frame() -> pd.DataFrame:
     return pd.DataFrame(
         {
             "key": ["1", "2", "3"],
-            "day": pd.Categorical(
-                ["a", "a", "b"], categories=["b", "a", "empty"], ordered=True
-            ),
+            "day": pd.Categorical(["a", "a", "b"], categories=["b", "a", "empty"], ordered=True),
             "category": ["short", None, "new"],
         }
     )
@@ -26,9 +24,7 @@ def test_counts_percentages_and_missing_groups_reconcile() -> None:
     """Null labels stay visible and each nonempty stack accounts for its cohort."""
     from chart_data import prepare_chart_data
 
-    data = prepare_chart_data(
-        _frame(), x="day", group="category", group_order=("short", "absent")
-    )
+    data = prepare_chart_data(_frame(), x="day", group="category", group_order=("short", "absent"))
     assert data.cohort == data.table["count"].sum() == 3
     assert dict(data.totals) == {"b": 1, "a": 2, "empty": 0}
     assert data.table.groupby("x")["percent"].sum().to_dict() == {
@@ -45,9 +41,7 @@ def test_order_and_unknown_groups_are_stable() -> None:
     """Explicit bands survive zero counts and ties have stable label ordering."""
     from chart_data import prepare_chart_data
 
-    frame = pd.DataFrame(
-        {"key": ["1", "2"], "country": ["z", "a"], "band": ["new", None]}
-    )
+    frame = pd.DataFrame({"key": ["1", "2"], "country": ["z", "a"], "band": ["new", None]})
     order = ("> 504", "Unbekannte Dauer", "short")
     data = prepare_chart_data(
         frame, x="country", group="band", group_order=order, sort_x_by_total=True
@@ -74,9 +68,7 @@ def test_absolute_relative_log_figures_share_counts(
     from chart_data import prepare_chart_data
     from plotting import build_distribution_figure
 
-    data = prepare_chart_data(
-        _frame(), x="day", group="category", group_order=("absent",)
-    )
+    data = prepare_chart_data(_frame(), x="day", group="category", group_order=("absent",))
     absolute = build_distribution_figure(data, kind=kind)
     relative = build_distribution_figure(data, mode="relative", kind=kind)
     log = build_distribution_figure(data, mode="log", kind=kind)
@@ -88,9 +80,7 @@ def test_absolute_relative_log_figures_share_counts(
     assert sum(sum(t.y) for t in traces(relative)) == pytest.approx(2)
     assert [tuple(t.y) for t in traces(absolute)] == [tuple(t.y) for t in traces(log)]
     assert log.layout.yaxis.type == "log" and log.layout.yaxis.range is None
-    assert all(
-        t.type == ("bar" if kind == "bar" else "scatter") for t in traces(absolute)
-    )
+    assert all(t.type == ("bar" if kind == "bar" else "scatter") for t in traces(absolute))
 
 
 def test_chart_helpers_are_pure() -> None:

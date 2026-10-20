@@ -47,9 +47,7 @@ def test_context_is_explicit_and_styles_are_scoped() -> None:
     }
     assert "css-" not in CUSTOM_CSS and "p, div, span, label" not in CUSTOM_CSS
     assert ".st-key-dashboard" in CUSTOM_CSS
-    context = DashboardContext(
-        pd.DataFrame(), pd.DataFrame(), None, load_settings(), "day", "Day"
-    )
+    context = DashboardContext(pd.DataFrame(), pd.DataFrame(), None, load_settings(), "day", "Day")
     with pytest.raises(FrozenInstanceError):
         setattr(context, "x_axis", "other")
 
@@ -86,16 +84,10 @@ def test_empty_cache_filtered_empty_and_no_company_keep_import_controls(
     import dashboard_views
 
     assert callable(dashboard_views.render_dashboard)
-    frame = (
-        pd.DataFrame()
-        if empty_kind == "cache"
-        else test_ui.CountryRefreshUITests()._frame()
-    )
+    frame = pd.DataFrame() if empty_kind == "cache" else test_ui.CountryRefreshUITests()._frame()
     with _app(frame) as app:
         if empty_kind == "filtered":
-            app.sidebar.date_input[0].set_value(
-                (date(2024, 1, 1), date(2024, 1, 2))
-            ).run()
+            app.sidebar.date_input[0].set_value((date(2024, 1, 1), date(2024, 1, 2))).run()
         elif empty_kind == "company":
             app.sidebar.multiselect[0].set_value([]).run()
         assert not app.exception
@@ -187,9 +179,7 @@ def test_interactive_filters_collection_columns_without_losing_lock(
         app.sidebar.date_input[0].set_value((date(2026, 9, 1), date(2026, 9, 10))).run()
         assert not app.exception
         supplied = render.call_args.args[0]
-        assert "key" in supplied and not {"lists", "dicts", "sets"}.intersection(
-            supplied.columns
-        )
+        assert "key" in supplied and not {"lists", "dicts", "sets"}.intersection(supplied.columns)
     held = []
 
     def check_lock(*args: Any, **kwargs: Any) -> Any:

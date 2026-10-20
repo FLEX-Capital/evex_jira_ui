@@ -28,10 +28,7 @@ def test_source_maintenance_uses_captured_settings_and_safe_errors(
     assert not app.exception
     assert all("SYNTHETIC_PRIVATE_MARKER" not in e.value for e in app.error)
     assert any("permission" in e.value for e in app.error)
-    assert (
-        refresh.call_args.kwargs["fetch_sources"].keywords["settings"]
-        == load_settings()
-    )
+    assert refresh.call_args.kwargs["fetch_sources"].keywords["settings"] == load_settings()
 
 
 def test_source_maintenance_preserves_concurrent_revision(public_ui: None) -> None:
@@ -65,9 +62,7 @@ class CompanyUITests(unittest.TestCase):
         with patch("data_loading.load_data", return_value=pd.DataFrame()):
             app = AppTest.from_file("app.py", default_timeout=30).run()
             self.assertEqual(len(app.sidebar.multiselect), 1)
-            self.assertEqual(
-                app.sidebar.multiselect[0].value, ["Ipro", "Amparex", "Euronet"]
-            )
+            self.assertEqual(app.sidebar.multiselect[0].value, ["Ipro", "Amparex", "Euronet"])
             app.sidebar.multiselect[0].set_value([]).run()
             self.assertFalse(app.exception)
             self.assertTrue(any("Firma" in info.value for info in app.info))
@@ -95,9 +90,7 @@ class CompanyUITests(unittest.TestCase):
             patch("interactive.render_interactive"),
         ):
             app = AppTest.from_file("app.py", default_timeout=30).run()
-            app.sidebar.date_input[0].set_value(
-                (date(2026, 9, 1), date(2026, 9, 10))
-            ).run()
+            app.sidebar.date_input[0].set_value((date(2026, 9, 1), date(2026, 9, 10))).run()
             self.assertFalse(app.exception)
             raw_frame = app.dataframe[0].value
             self.assertEqual(set(raw_frame["key"]), {"SDIPR-1", "SDAX-1", "SDEU-1"})
@@ -153,9 +146,7 @@ class CountryRefreshUITests(unittest.TestCase):
             app = AppTest.from_file("app.py", default_timeout=60).run()
             # The app st.stop()s when the window is empty, so the tab (and its
             # buttons) never render. Put SDEU-1 inside it; SDEU-2 stays out.
-            app.sidebar.date_input[0].set_value(
-                (date(2026, 9, 1), date(2026, 9, 10))
-            ).run()
+            app.sidebar.date_input[0].set_value((date(2026, 9, 1), date(2026, 9, 10))).run()
             app.checkbox(key="country_force_refresh").check().run()
             buttons = [b for b in app.button if "Länder" in b.label]
             self.assertEqual(len(buttons), 1, "Länder button missing")
@@ -185,9 +176,7 @@ class CountryRefreshUITests(unittest.TestCase):
             app = AppTest.from_file("app.py", default_timeout=60).run()
             # The app st.stop()s when the window is empty, so the tab (and its
             # buttons) never render. Put SDEU-1 inside it; SDEU-2 stays out.
-            app.sidebar.date_input[0].set_value(
-                (date(2026, 9, 1), date(2026, 9, 10))
-            ).run()
+            app.sidebar.date_input[0].set_value((date(2026, 9, 1), date(2026, 9, 10))).run()
             buttons = [b for b in app.button if "Länder" in b.label]
             buttons[0].click().run()
             self.assertFalse(app.exception)
@@ -259,9 +248,7 @@ class StaleCountryRefreshUITests(unittest.TestCase):
             patch("interactive.render_interactive"),
         ):
             app = AppTest.from_file("app.py", default_timeout=30).run()
-            app.sidebar.date_input[0].set_value(
-                (date(2026, 9, 1), date(2026, 9, 10))
-            ).run()
+            app.sidebar.date_input[0].set_value((date(2026, 9, 1), date(2026, 9, 10))).run()
             observed = {"revision": "before"}
 
             def concurrent_country_refresh(*args, **kwargs):
@@ -291,9 +278,7 @@ class StaleCountryRefreshUITests(unittest.TestCase):
             save_tickets.assert_not_called()
 
 
-def test_sidebar_submits_all_desks_despite_company_display_filter(
-    tmp_path, monkeypatch
-):
+def test_sidebar_submits_all_desks_despite_company_display_filter(tmp_path, monkeypatch):
     from test_temporary_history_pull import FakeJobs
 
     import sync_jobs

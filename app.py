@@ -38,9 +38,7 @@ st.sidebar.header("\n\nJIRA Data Analysis")
 require_password()
 
 st.sidebar.subheader("Data Controls")
-selected_companies = st.sidebar.multiselect(
-    "Firma", COMPANY_LABELS, default=COMPANY_LABELS
-)
+selected_companies = st.sidebar.multiselect("Firma", COMPANY_LABELS, default=COMPANY_LABELS)
 
 cache_revision = None
 try:
@@ -77,9 +75,7 @@ if len(picked) == 2:
     start_date, end_date = picked
     st.session_state["date_range"] = (start_date, end_date)
 else:
-    start_date, end_date = st.session_state.get(
-        "date_range", (start_date.date(), end_date.date())
-    )
+    start_date, end_date = st.session_state.get("date_range", (start_date.date(), end_date.date()))
     st.sidebar.info("Bitte Enddatum wählen.")
 
 # The picked day must span 00:00-23:59:59 Berlin. Building these in UTC shifted the
@@ -120,11 +116,7 @@ if "completion_state" not in df or df["completion_state"].isna().any():
 for group_column in ("Hauptkategorie", "status_category", "status", "zentrale"):
     if group_column in df:
         df[group_column] = (
-            df[group_column]
-            .astype("string")
-            .fillna("")
-            .str.strip()
-            .replace("", "Unbekannt")
+            df[group_column].astype("string").fillna("").str.strip().replace("", "Unbekannt")
         )
 completion_counts = df["completion_state"].value_counts()
 st.caption(
@@ -132,6 +124,4 @@ st.caption(
     f"Offen: {completion_counts.get('open', 0)}; "
     f"Unbekannter Abschlussstatus: {completion_counts.get('unknown', 0)}"
 )
-render_dashboard(
-    DashboardContext(df, df_old, cache_revision, settings, x_axis, x_axis_label)
-)
+render_dashboard(DashboardContext(df, df_old, cache_revision, settings, x_axis, x_axis_label))

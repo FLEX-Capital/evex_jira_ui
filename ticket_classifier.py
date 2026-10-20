@@ -80,9 +80,7 @@ def resolve_deployment() -> str:
 
 
 ResolutionBucket = Literal["question_answer", "support_todo", "team_handoff", "unclear"]
-QuestionAnswerSubBucket = Literal[
-    "how_to", "where_to_find", "policy_or_process_clarification"
-]
+QuestionAnswerSubBucket = Literal["how_to", "where_to_find", "policy_or_process_clarification"]
 SupportTodoSubBucket = Literal[
     "data_correction",
     "document_or_invoice_resend",
@@ -104,9 +102,7 @@ SubBucket = Literal[
     TeamHandoffSubBucket,
     UnclearSubBucket,
 ]
-AIMode = Literal[
-    "fully_automatable", "ai_drafts_human_sends", "ai_assisted_triage", "human_only"
-]
+AIMode = Literal["fully_automatable", "ai_drafts_human_sends", "ai_assisted_triage", "human_only"]
 RESOLUTION_BUCKETS = get_args(ResolutionBucket)
 SUB_BUCKETS = get_args(SubBucket)
 AI_MODES = get_args(AIMode)
@@ -123,9 +119,7 @@ class TicketClassification(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    reasoning: str = Field(
-        description="One sentence in English explaining the classification."
-    )
+    reasoning: str = Field(description="One sentence in English explaining the classification.")
     resolution_bucket: ResolutionBucket = Field(
         description=f"One of: {', '.join(RESOLUTION_BUCKETS)}"
     )
@@ -209,9 +203,7 @@ Judge the request itself, independently of resolution_bucket.
 """
 
 
-def build_client(
-    deployment: str | None = None, *, settings: Settings | None = None
-) -> AzureOpenAI:
+def build_client(deployment: str | None = None, *, settings: Settings | None = None) -> AzureOpenAI:
     """Construct the requested deployment client from one settings snapshot."""
     connection = (settings or load_settings()).require_classifier(deployment)
     return AzureOpenAI(
@@ -251,9 +243,7 @@ def scalar_text(value: object) -> str:
             text = value.strip()
         elif isinstance(value, Sized) and len(value) == 0:
             return ""
-        elif not pd.api.types.is_scalar(value) or isinstance(
-            value, (bytes, bytearray, memoryview)
-        ):
+        elif not pd.api.types.is_scalar(value) or isinstance(value, (bytes, bytearray, memoryview)):
             raise TicketInputError("invalid_text")
         elif value is None or bool(pd.isna(value)):
             return ""
@@ -277,9 +267,7 @@ def _ticket_fields(row: Mapping[str, Any]) -> dict[str, str]:
         )
     }
     for name in ("Hauptkategorie", "description", "comments"):
-        if fields[name].lower() in ("nan", "none") or (
-            name == "comments" and fields[name] == "[]"
-        ):
+        if fields[name].lower() in ("nan", "none") or (name == "comments" and fields[name] == "[]"):
             fields[name] = ""
     if fields["Unterkategorie"].upper() in ("NA", "NAN", "NONE"):
         fields["Unterkategorie"] = ""
@@ -352,23 +340,13 @@ def validate_ticket_input(
 
 def load_cache(cache_path: str | Path | None = None) -> pd.DataFrame:
     """Read full versioned classification history; selection belongs to the caller."""
-    path = (
-        load_settings().paths.classifications
-        if cache_path is None
-        else Path(cache_path)
-    )
+    path = load_settings().paths.classifications if cache_path is None else Path(cache_path)
     return load_classifications(path)
 
 
-def save_cache(
-    frame: pd.DataFrame, cache_path: str | Path | None = None
-) -> pd.DataFrame:
+def save_cache(frame: pd.DataFrame, cache_path: str | Path | None = None) -> pd.DataFrame:
     """Merge prepared results with the latest disk identities under its own transaction."""
-    path = (
-        load_settings().paths.classifications
-        if cache_path is None
-        else Path(cache_path)
-    )
+    path = load_settings().paths.classifications if cache_path is None else Path(cache_path)
     return merge_classifications(path, frame)
 
 
@@ -380,9 +358,7 @@ class ClassificationOutputError(ValueError):
         super().__init__(code)
 
 
-def classifier_configuration(
-    settings: Settings, *, model: str | None = None
-) -> ClassifierConfig:
+def classifier_configuration(settings: Settings, *, model: str | None = None) -> ClassifierConfig:
     """Capture every request/reuse policy input without requiring credentials.
 
     Args:
@@ -397,9 +373,7 @@ def classifier_configuration(
         "parents": _SUB_BUCKETS_BY_PARENT,
     }
     taxonomy_digest = hashlib.sha256(
-        json.dumps(
-            taxonomy, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-        ).encode()
+        json.dumps(taxonomy, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
     ).hexdigest()
     return ClassifierConfig(
         settings.azure_endpoint or "",
@@ -414,9 +388,7 @@ def classifier_configuration(
     )
 
 
-def _error_result(
-    key: str, text_hash: str | None, model: str | None, code: str
-) -> dict[str, Any]:
+def _error_result(key: str, text_hash: str | None, model: str | None, code: str) -> dict[str, Any]:
     result: dict[str, Any] = dict.fromkeys(RESULT_COLUMNS)
     result.update(key=key, text_hash=text_hash, model=model, error=code)
     return result
@@ -451,9 +423,7 @@ def classify_one(
             messages=[
                 {
                     "role": "system",
-                    "content": (
-                        SYSTEM_PROMPT if system_prompt is None else system_prompt
-                    ),
+                    "content": (SYSTEM_PROMPT if system_prompt is None else system_prompt),
                 },
                 {"role": "user", "content": f"Ticket {key}\n\n{text}"},
             ],
@@ -511,12 +481,8 @@ def classify_one(
         error = "timeout"
     except openai.APIConnectionError:
         error = "connection"
-    except (
-        Exception
-    ) as exc:  # noqa: BLE001 - isolate a provider failure for this ticket
-        error = safe_diagnostic(
-            exc, operation_id=uuid4().hex, stage="fetch", key=key
-        ).code
+    except Exception as exc:  # noqa: BLE001 - isolate a provider failure for this ticket
+        error = safe_diagnostic(exc, operation_id=uuid4().hex, stage="fetch", key=key).code
     return _error_result(key, _hash_text(text), model, error)
 
 
@@ -560,15 +526,13 @@ def _effective_configuration(
     # Deliberate injected fake clients retain the explicit configuration seam.
     # Real SDK clients expose effective routing via public base_url/default_query.
     if isinstance(client, openai.AzureOpenAI):
-        route = re.fullmatch(
-            r"(.*)/openai(?:/deployments/([^/]+))?/?", client.base_url.path
-        )
+        route = re.fullmatch(r"(.*)/openai(?:/deployments/([^/]+))?/?", client.base_url.path)
         api_version = client.default_query.get("api-version")
         if route is None or not isinstance(api_version, str) or not api_version:
             raise ValueError("invalid_client_configuration")
-        endpoint = str(
-            client.base_url.copy_with(path=route[1], query=None, fragment=None)
-        ).rstrip("/")
+        endpoint = str(client.base_url.copy_with(path=route[1], query=None, fragment=None)).rstrip(
+            "/"
+        )
         deployment = route[2] or config.deployment
         if explicit and (endpoint, deployment, api_version) != (
             config.endpoint,
@@ -578,9 +542,7 @@ def _effective_configuration(
             raise ValueError("conflicting_client_configuration")
         if model is not None and model != deployment:
             raise ValueError("conflicting_client_configuration")
-        config = replace(
-            config, endpoint=endpoint, deployment=deployment, api_version=api_version
-        )
+        config = replace(config, endpoint=endpoint, deployment=deployment, api_version=api_version)
     return config
 
 
@@ -634,12 +596,7 @@ def classify_tickets(
         raise ValueError("invalid_limit")
     max_chars = config.generation.get("max_chars")
     max_tokens = config.generation.get("max_completion_tokens")
-    if (
-        type(max_chars) is not int
-        or max_chars < 1
-        or type(max_tokens) is not int
-        or max_tokens < 1
-    ):
+    if type(max_chars) is not int or max_chars < 1 or type(max_tokens) is not int or max_tokens < 1:
         raise ValueError("invalid_generation_limits")
     if {"model", "messages", "response_format"}.intersection(config.generation):
         raise ValueError("reserved_generation_setting")
@@ -705,9 +662,9 @@ def classify_tickets(
         else:
             result = matches
         rank = {key: position for position, key in enumerate(requested)}
-        result = result.loc[
-            result["key"].map(rank).sort_values(kind="stable").index
-        ].reset_index(drop=True)
+        result = result.loc[result["key"].map(rank).sort_values(kind="stable").index].reset_index(
+            drop=True
+        )
         result.attrs["classification_errors"] = row_errors
         return result
 
@@ -750,12 +707,8 @@ def classify_tickets(
                     system_prompt=captured_prompt,
                 )
             )
-        except (
-            Exception
-        ) as exc:  # noqa: BLE001 - a failed worker cannot abort unrelated requests
-            cause = safe_diagnostic(
-                exc, operation_id=uuid4().hex, stage="fetch", key=key
-            )
+        except Exception as exc:  # noqa: BLE001 - a failed worker cannot abort unrelated requests
+            cause = safe_diagnostic(exc, operation_id=uuid4().hex, stage="fetch", key=key)
             result = _error_result(key, None, config.deployment, cause.code)
         identity = identities[key]
         result.update(
@@ -776,9 +729,7 @@ def classify_tickets(
 
     try:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = [
-                pool.submit(classify_pending, key, text) for key, text in pending
-            ]
+            futures = [pool.submit(classify_pending, key, text) for key, text in pending]
             for future in as_completed(futures):
                 result = future.result()
                 results.append(result)
@@ -792,9 +743,7 @@ def classify_tickets(
         if bar is not None:
             bar.close()
     successful = [record for record in results if not record["error"]]
-    print(
-        f"Done: {len(successful)} classified, {len(results) - len(successful)} failed."
-    )
+    print(f"Done: {len(successful)} classified, {len(results) - len(successful)} failed.")
     if successful:
         totals = {
             name: sum(record[name] or 0 for record in successful)

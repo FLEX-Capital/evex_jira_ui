@@ -22,18 +22,30 @@ runtimes:
 # This is the section where you manage your linters.
 # (https://docs.trunk.io/check/configuration)
 lint:
+  definitions:
+    # Same pinned mypy flags/targets; one graph for the batch instead of per-file repeats.
+    - name: mypy
+      commands:
+        - name: lint
+          version: <1.20.0
+          output: mypy
+          run: >-
+            mypy --ignore-missing-imports --follow-imports=silent --show-error-codes
+            --show-column-numbers ${target}
+          run_from: ${root_or_parent_with_any_config}
+          batch: true
+          success_codes: [0, 1]
+          stdin: false
   enabled:
     - actionlint@1.7.12
     - mypy@1.13.0
     - yamllint@1.38.0
     - bandit@1.9.4
-    - black@26.10.1
     - checkov@3.3.29
     - dotenv-linter@4.0.0
     - git-diff-check
     - grype@0.120.1
     - hadolint@2.15.1
-    - isort@9.0.2
     - markdownlint@0.49.1
     - osv-scanner@2.7.0
     - oxipng@10.2.1
@@ -42,6 +54,9 @@ lint:
     - taplo@0.10.0
     - trufflehog@3.99.2
   ignore:
+    # Native python-quality checks notebooks without the broken location adapter.
+    - linters: [ruff]
+      paths: ["**/*.ipynb"]
     # Unsupported historical source; the separate notebook output guard still applies.
     - linters: [ruff, black, isort, mypy]
       paths: [analysis/archive/**]
@@ -50,9 +65,17 @@ lint:
       paths:
         - tests
 actions:
+  definitions:
+    - id: python-quality
+      display_name: Native Python Quality
+      description: Check index source/config with locked native Ruff and notebook output policy
+      run: .venv/bin/python tools/check_python.py --staged --index-file '${env.GIT_INDEX_FILE}'
+      triggers:
+        - git_hooks: [pre-commit, pre-push]
   disabled:
     - trunk-announce
   enabled:
+    - python-quality
     - trunk-check-pre-commit
     - trunk-fmt-pre-commit
     - trunk-check-pre-push

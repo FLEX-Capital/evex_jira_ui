@@ -91,9 +91,7 @@ def test_legacy_link_text_keeps_repeated_records(storage: Path) -> None:
     from issue_links import LinkGraph
 
     record = issue(key="SDAX-1", links=[outward("EXAX-1"), outward("EXAX-1")])
-    row = load_project_issues(
-        "SDAX", [record], link_graph=LinkGraph({"EXAX-1": ()}, ())
-    ).iloc[0]
+    row = load_project_issues("SDAX", [record], link_graph=LinkGraph({"EXAX-1": ()}, ())).iloc[0]
     assert row.clones == "EXAX-1,EXAX-1" and row.n_clones == 2
     assert row.clone_count == 1
 
@@ -115,9 +113,7 @@ def test_optional_link_failure_keeps_valid_ticket_and_other_desks(
     prior = load_project_issues(
         "SDAX",
         [first],
-        link_graph=LinkGraph(
-            {"EXAX-1": (IssueLink("Cloners", "outward", "AX-9"),)}, ()
-        ),
+        link_graph=LinkGraph({"EXAX-1": (IssueLink("Cloners", "outward", "AX-9"),)}, ()),
     )
     data_loading.save_data(prior)
     monkeypatch.setattr(

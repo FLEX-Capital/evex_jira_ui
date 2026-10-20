@@ -2,20 +2,20 @@
 
 ## Tooling
 
-| Tool     | Purpose                       | Command                         |
-| -------- | ----------------------------- | ------------------------------- |
-| `uv`     | Package management            | `uv add <pkg>`, `uv sync`       |
-| `pytest` | Testing                       | `uv run pytest`                 |
-| `ruff`   | Linting and formatting        | via `trunk fmt` / `trunk check` |
-| `mypy`   | Type checking (non-blocking)  | via `trunk check`               |
-| `trunk`  | Orchestrates all of the above | `trunk fmt && trunk check`      |
+| Tool     | Purpose                       | Command                                                        |
+| -------- | ----------------------------- | -------------------------------------------------------------- |
+| `uv`     | Package management            | `uv add <pkg>`, `uv sync`                                      |
+| `pytest` | Testing                       | `uv run pytest`                                                |
+| `ruff`   | Linting and formatting        | `uv run --frozen --no-sync python tools/check_python.py --all` |
+| `mypy`   | Type checking (required)      | via `trunk check`                                              |
+| `trunk`  | Orchestrates all of the above | `trunk fmt && trunk check`                                     |
 
 Never use `pip install` directly — always `uv add`.
 
 ## Style
 
 - Line length: **100 characters**
-- Formatting and import order are enforced automatically by ruff on save and at commit time
+- Ruff alone owns Python formatting and import order. Run `uv run --frozen --no-sync ruff format .` to format, then `uv run --frozen --no-sync python tools/check_python.py --all` to check. Commit and push hooks check isolated index bytes/config; Trunk retains non-Python gates. Historical archive source is excluded from lint but every tracked notebook obeys the output guard.
 
 ## Type hints
 
@@ -23,12 +23,11 @@ All public function and method signatures must have type hints.
 
 ```python
 # correct
-def calculate_premium(base: float, risk_factor: float) -> float:
-    ...
+def calculate_premium(base: float, risk_factor: float) -> float: ...
+
 
 # wrong — no type hints
-def calculate_premium(base, risk_factor):
-    ...
+def calculate_premium(base, risk_factor): ...
 ```
 
 Types belong in signatures only — never repeat them in docstrings.
@@ -76,7 +75,7 @@ Ruff enforces the naming rules (N8xx) — CI fails on violations.
 
 - Framework: `pytest`
 - All tests live under `tests/`
-- Aim for **80%+** coverage — visible as a PR comment, not a CI gate
+- Maintain **80%+** application coverage; CI enforces the threshold and comments on scoped PRs.
 - Test function names describe behaviour, not the method under test: `test_rejects_expired_policy`, not `test_calculate_premium`
 - No untested public functions
 

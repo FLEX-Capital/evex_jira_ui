@@ -95,9 +95,7 @@ def test_partial_cleanup_inventory_io_failure_preserves_exact_progress(
         assert caught.value.deleted == (ticket,) and caught.value.failed == (country,)
         assert "SYNTHETIC_PRIVATE_MARKER" not in str(caught.value)
     else:
-        assert (
-            maintenance.main(["cleanup", "--apply", "--plan-digest", plan.digest]) == 3
-        )
+        assert maintenance.main(["cleanup", "--apply", "--plan-digest", plan.digest]) == 3
         output = capsys.readouterr().out
         assert str(ticket) in output and str(country) in output
         assert "SYNTHETIC_PRIVATE_MARKER" not in output

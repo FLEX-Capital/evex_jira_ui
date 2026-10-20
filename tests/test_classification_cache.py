@@ -100,8 +100,7 @@ def test_config_identity_covers_every_policy_input(changes: dict[str, Any]) -> N
     assert len(fingerprint) == 64
     assert configuration_fingerprint(replace(config, **changes)) != fingerprint
     assert (
-        configuration_fingerprint(replace(config, endpoint="https://example.test/"))
-        == fingerprint
+        configuration_fingerprint(replace(config, endpoint="https://example.test/")) == fingerprint
     )
     identity = classification_identity("SDAX-1", "same", config)
     assert identity == classification_identity("SDAX-1", "same", config)
@@ -172,8 +171,7 @@ merge_classifications(path,pd.DataFrame(rows))
     cache = load_classifications(path)
     assert len(cache) == 5
     shared = cache[
-        (cache.key == "SDAX-1")
-        & (cache.text_digest == hashlib.sha256(b"same").hexdigest())
+        (cache.key == "SDAX-1") & (cache.text_digest == hashlib.sha256(b"same").hexdigest())
     ]
     assert len(shared) == 1 and shared.iloc[0].intent_label == "1"
     assert not list(tmp_path.glob(".evex-atomic-*.tmp"))
@@ -294,9 +292,7 @@ def test_legacy_migration_never_invents_current_results(
     backups = list(tmp_path.glob("legacy.parquet.bak-*"))
     assert len(backups) == 1 and backups[0].read_bytes() == original
     metadata = pq.read_schema(path).metadata
-    assert (
-        metadata is not None and metadata[b"evex_classification_schema_version"] == b"2"
-    )
+    assert metadata is not None and metadata[b"evex_classification_schema_version"] == b"2"
     migrated = load_classifications(path)
     assert migrated.iloc[0].text_hash == old["text_hash"]
     assert migrated.iloc[0].verification_state == "legacy_unverified"
@@ -304,9 +300,7 @@ def test_legacy_migration_never_invents_current_results(
 
 
 @pytest.mark.parametrize("kind", ["future", "corrupt"])
-def test_future_and_corrupt_classification_cache_fail_safely(
-    tmp_path: Path, kind: str
-) -> None:
+def test_future_and_corrupt_classification_cache_fail_safely(tmp_path: Path, kind: str) -> None:
     """Unsupported/corrupt files cannot masquerade as an empty reusable cache."""
     from classification_cache import ClassificationCacheError, load_classifications
 
@@ -316,9 +310,7 @@ def test_future_and_corrupt_classification_cache_fail_safely(
     else:
         table = pa.Table.from_pandas(pd.DataFrame([_record()]))
         pq.write_table(
-            table.replace_schema_metadata(
-                {b"evex_classification_schema_version": b"99"}
-            ),
+            table.replace_schema_metadata({b"evex_classification_schema_version": b"99"}),
             path,
         )
     with pytest.raises(ClassificationCacheError) as caught:

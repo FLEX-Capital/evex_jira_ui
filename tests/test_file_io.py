@@ -109,9 +109,7 @@ def test_unique_temporary_and_nested_lock_are_process_safe(tmp_path: Path) -> No
     release = context.Event()
     entered = [context.Event(), context.Event()]
     children = [
-        context.Process(
-            target=_process_write, args=(str(target), value, event, release)
-        )
+        context.Process(target=_process_write, args=(str(target), value, event, release))
         for value, event in zip((one, two), entered, strict=True)
     ]
     try:
@@ -162,9 +160,7 @@ def test_fresh_import_has_no_checkpoint_importer_cycle(
     assert not root.exists()
 
 
-def test_file_sync_precedes_replace(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_file_sync_precedes_replace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The target keeps its mode and replacement follows flushed, synced close."""
     import file_io
 

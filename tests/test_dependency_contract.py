@@ -77,9 +77,7 @@ def test_locked_groups_preserve_compatibility_constraints() -> None:
     assert not (ROOT / "requirements.txt").exists()
 
 
-def test_clean_runtime_imports_supported_entry_points(
-    clean_runtime: Path, tmp_path: Path
-) -> None:
+def test_clean_runtime_imports_supported_entry_points(clean_runtime: Path, tmp_path: Path) -> None:
     """Runtime imports and empty-cache Streamlit startup need no analysis packages."""
     modules = [
         "asset_country",

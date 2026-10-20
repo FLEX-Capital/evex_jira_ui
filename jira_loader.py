@@ -57,9 +57,7 @@ def fetch_asset_object(
     config = settings or load_settings()
     cloud_id = config.tenant.cloud_id if cloud_id is None else cloud_id
     workspace_id = config.tenant.workspace_id if workspace_id is None else workspace_id
-    return fetch_asset_object_uncached(
-        cloud_id, workspace_id, object_id, settings=config
-    )
+    return fetch_asset_object_uncached(cloud_id, workspace_id, object_id, settings=config)
 
 
 def fetch_asset_object_uncached(
@@ -216,9 +214,7 @@ def enrich_issue_assets(issue, *, category_resolver=None, settings=None):
                     result["category_status"][field] = "resolved"
                 else:
                     result["category_status"][field] = "unresolved"
-                    result["asset_errors"].append(
-                        f"{field}/{object_id}: {resolved.error}"
-                    )
+                    result["asset_errors"].append(f"{field}/{object_id}: {resolved.error}")
                 continue
             try:
                 asset = fetch_asset_object(
@@ -279,8 +275,7 @@ def dedupe_issues(issues, key_field="key"):
         incoming_time = _issue_updated_ts(issue)
         current_time = _issue_updated_ts(current) if current is not None else None
         if current is None or (
-            current_time is None
-            or (incoming_time is not None and incoming_time >= current_time)
+            current_time is None or (incoming_time is not None and incoming_time >= current_time)
         ):
             best[key] = issue
     return list(best.values())
@@ -394,9 +389,7 @@ def fetch_jira_issues(
         if not next_token:
             break
         if fetched >= max_issues:
-            raise RuntimeError(
-                f"{project}: issue limit reached before all pages were fetched"
-            )
+            raise RuntimeError(f"{project}: issue limit reached before all pages were fetched")
         if next_token in seen_tokens:
             raise RuntimeError(f"{project}: repeated pagination token")
         seen_tokens.add(next_token)

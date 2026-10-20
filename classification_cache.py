@@ -156,9 +156,7 @@ def configuration_fingerprint(config: ClassifierConfig) -> str:
         Full SHA-256 of canonical sorted compact UTF-8 JSON.
     """
     return hashlib.sha256(
-        _canonical(
-            {field.name: getattr(config, field.name) for field in fields(config)}
-        )
+        _canonical({field.name: getattr(config, field.name) for field in fields(config)})
     ).hexdigest()
 
 
@@ -221,38 +219,25 @@ def _normalize(frame: pd.DataFrame, *, stored: bool = False) -> pd.DataFrame:
             raise ClassificationCacheError("invalid_identity")
         if verified:
             if not all(
-                isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value)
-                for value in digests
+                isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value) for value in digests
             ):
                 raise ClassificationCacheError("invalid_identity")
             try:
                 completed = pd.Timestamp(row["completed_at"])
-                if (
-                    pd.isna(completed)
-                    or completed.tzinfo is None
-                    or completed.utcoffset() is None
-                ):
+                if pd.isna(completed) or completed.tzinfo is None or completed.utcoffset() is None:
                     raise ValueError("invalid_completion_time")
             except (TypeError, ValueError, OverflowError):
                 raise ClassificationCacheError("invalid_completion_time") from None
         result.loc[index, "verification_state"] = state
     try:
-        result["completed_at"] = pd.to_datetime(
-            result["completed_at"], utc=True, errors="raise"
-        )
-        result["confidence"] = pd.to_numeric(
-            result["confidence"], errors="raise"
-        ).astype("float64")
+        result["completed_at"] = pd.to_datetime(result["completed_at"], utc=True, errors="raise")
+        result["confidence"] = pd.to_numeric(result["confidence"], errors="raise").astype("float64")
         for column in _TOKENS:
-            result[column] = pd.to_numeric(result[column], errors="raise").astype(
-                "Int64"
-            )
+            result[column] = pd.to_numeric(result[column], errors="raise").astype("Int64")
     except (TypeError, ValueError, OverflowError):
         raise ClassificationCacheError("invalid_record") from None
     for column in set(_COLUMNS) - {*_TOKENS, "confidence", "completed_at"}:
-        if not all(
-            _missing(value) or isinstance(value, str) for value in result[column]
-        ):
+        if not all(_missing(value) or isinstance(value, str) for value in result[column]):
             raise ClassificationCacheError("invalid_record")
     result.attrs = {"classification_schema_version": CLASSIFICATION_SCHEMA_VERSION}
     return result
@@ -297,9 +282,7 @@ def _deduplicate(frame: pd.DataFrame) -> pd.DataFrame:
         if identity not in selected or order > selected[identity][0]:
             selected[identity] = order, record
     return _normalize(
-        pd.DataFrame(
-            [selected[key][1] for key in sorted(selected)], columns=frame.columns
-        )
+        pd.DataFrame([selected[key][1] for key in sorted(selected)], columns=frame.columns)
     )
 
 
@@ -325,11 +308,7 @@ def _combine(current: pd.DataFrame, incoming: pd.DataFrame) -> pd.DataFrame:
         for frame in (current, pd.DataFrame(additional, columns=incoming.columns))
         if not frame.empty
     ]
-    return (
-        _deduplicate(_normalize(pd.concat(frames, ignore_index=True)))
-        if frames
-        else current
-    )
+    return _deduplicate(_normalize(pd.concat(frames, ignore_index=True))) if frames else current
 
 
 def _decode(payload: bytes) -> tuple[pd.DataFrame, int | None]:
@@ -348,9 +327,7 @@ def _decode(payload: bytes) -> tuple[pd.DataFrame, int | None]:
         # Preserve historical fields without authorizing their reuse. Only the
         # artifact's version metadata can establish current fingerprint ownership.
         frame["verification_state"] = "legacy_unverified"
-    return _deduplicate(_normalize(frame, stored=version is not None)), (
-        2 if version else None
-    )
+    return _deduplicate(_normalize(frame, stored=version is not None)), (2 if version else None)
 
 
 def load_classifications(path: Path) -> pd.DataFrame:
@@ -385,9 +362,7 @@ def _write(path: Path, frame: pd.DataFrame) -> None:
 
 
 def _backup(path: Path, payload: bytes) -> Path:
-    target = path.with_name(
-        f"{path.name}.bak-classification-{datetime.now(UTC):%Y%m%d-%H%M%S-%f}"
-    )
+    target = path.with_name(f"{path.name}.bak-classification-{datetime.now(UTC):%Y%m%d-%H%M%S-%f}")
     if target.exists():
         raise ClassificationCacheError("backup_conflict")
 

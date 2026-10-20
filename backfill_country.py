@@ -97,6 +97,7 @@ def write_pickle_atomically(df, path, *, settings=None):
 
 
 def main():
+    """Run the explicitly requested country-cache enrichment operation."""
     config = load_settings()
     paths = config.paths
     parser = argparse.ArgumentParser(description=__doc__)
@@ -162,8 +163,7 @@ def main():
 
     counts = df["Land"].value_counts()
     buckets = sum(
-        int(counts.get(label, 0))
-        for label in (NO_COUNTRY_ON_ASSET, NO_ASSETS_LINKED, NOT_RESOLVED)
+        int(counts.get(label, 0)) for label in (NO_COUNTRY_ON_ASSET, NO_ASSETS_LINKED, NOT_RESOLVED)
     )
     print(f"  countries resolved  : {len(df) - buckets}")
     print(f"  {NO_COUNTRY_ON_ASSET} : {int(counts.get(NO_COUNTRY_ON_ASSET, 0))}")

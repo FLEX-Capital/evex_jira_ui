@@ -14,9 +14,7 @@ class AssetsTests(unittest.TestCase):
         issue = {
             "key": "SDEU-1",
             "fields": {
-                "customfield_10680": [
-                    {"workspaceId": loader.WORKSPACE_ID, "objectId": "41"}
-                ]
+                "customfield_10680": [{"workspaceId": loader.WORKSPACE_ID, "objectId": "41"}]
             },
             "asset_labels": {"41": "Sandbox"},
             "customer": {"id": "old"},
@@ -29,21 +27,15 @@ class AssetsTests(unittest.TestCase):
         ) as fetch:
             enriched = loader.enrich_issue_assets(issue)
         self.assertEqual(enriched["asset_labels"], {"41": "Normal category"})
-        self.assertEqual(
-            enriched["assets_workspace_id"], "9926cb30-3f07-4fb2-9c83-aa4fc551c721"
-        )
+        self.assertEqual(enriched["assets_workspace_id"], "9926cb30-3f07-4fb2-9c83-aa4fc551c721")
         self.assertNotIn("customer", enriched)
         self.assertIsNone(enriched["customer_country"])
-        self.assertEqual(
-            fetch.call_args.args, (loader.CLOUD_ID, loader.WORKSPACE_ID, "41")
-        )
+        self.assertEqual(fetch.call_args.args, (loader.CLOUD_ID, loader.WORKSPACE_ID, "41"))
 
     def test_workspace_mismatch_never_reinterprets_object_id(self):
         issue = {
             "key": "SDEU-1",
-            "fields": {
-                "customfield_10673": [{"workspaceId": "sandbox", "objectId": "41"}]
-            },
+            "fields": {"customfield_10673": [{"workspaceId": "sandbox", "objectId": "41"}]},
         }
         with patch.object(loader, "fetch_asset_object") as fetch:
             enriched = loader.enrich_issue_assets(issue)
@@ -55,22 +47,16 @@ class AssetsTests(unittest.TestCase):
         issue = {
             "key": "SDEU-1",
             "fields": {
-                "customfield_10673": [
-                    {"workspaceId": loader.WORKSPACE_ID, "objectId": "41"}
-                ]
+                "customfield_10673": [{"workspaceId": loader.WORKSPACE_ID, "objectId": "41"}]
             },
         }
-        with patch.object(
-            loader, "fetch_asset_object", side_effect=PermissionError("forbidden")
-        ):
+        with patch.object(loader, "fetch_asset_object", side_effect=PermissionError("forbidden")):
             enriched = loader.enrich_issue_assets(issue)
             self.assertEqual(enriched["asset_labels"], {})
             self.assertTrue(enriched["asset_errors"])
 
     def test_schema_discovery_uses_normal_cloud_and_workspace(self):
-        with patch.object(
-            loader, "jira_request", return_value={"values": []}
-        ) as request:
+        with patch.object(loader, "jira_request", return_value={"values": []}) as request:
             loader.fetch_object_schema_list()
         url = request.call_args.args[0]
         self.assertIn("/242cf880-c51a-4277-9381-781d5ae181df/", url)
@@ -104,9 +90,7 @@ class FetchTests(unittest.TestCase):
         }
         with (
             patch.object(loader, "JIRA", return_value=fake),
-            patch.object(
-                loader, "enrich_issue_assets", side_effect=lambda i, **kwargs: i
-            ),
+            patch.object(loader, "enrich_issue_assets", side_effect=lambda i, **kwargs: i),
         ):
             issues = loader.fetch_jira_issues(
                 datetime(2025, 1, 1, tzinfo=UTC),
@@ -135,16 +119,12 @@ class FetchTests(unittest.TestCase):
         fake = MagicMock()
         fake.myself.return_value = {"timeZone": "Europe/Berlin"}
         fake.enhanced_search_issues.return_value = {
-            "issues": [
-                {"key": "SDAX-1", "fields": {"created": "2026-09-02T00:00:00Z"}}
-            ],
+            "issues": [{"key": "SDAX-1", "fields": {"created": "2026-09-02T00:00:00Z"}}],
             "nextPageToken": "more",
         }
         with (
             patch.object(loader, "JIRA", return_value=fake),
-            patch.object(
-                loader, "enrich_issue_assets", side_effect=lambda i, **kwargs: i
-            ),
+            patch.object(loader, "enrich_issue_assets", side_effect=lambda i, **kwargs: i),
             self.assertRaisesRegex(RuntimeError, "limit"),
         ):
             loader.fetch_jira_issues(
@@ -201,9 +181,7 @@ class IncrementalFlushTests(unittest.TestCase):
         flushes = []
         with (
             patch.object(loader, "JIRA", return_value=self._fake_jira(pages)),
-            patch.object(
-                loader, "enrich_issue_assets", side_effect=lambda i, **kwargs: i
-            ),
+            patch.object(loader, "enrich_issue_assets", side_effect=lambda i, **kwargs: i),
         ):
             issues = loader.fetch_jira_issues(
                 datetime(2025, 1, 1, tzinfo=UTC),
@@ -228,9 +206,7 @@ class IncrementalFlushTests(unittest.TestCase):
                 "JIRA",
                 return_value=self._fake_jira([self._page(range(3), None)]),
             ),
-            patch.object(
-                loader, "enrich_issue_assets", side_effect=lambda i, **kwargs: i
-            ),
+            patch.object(loader, "enrich_issue_assets", side_effect=lambda i, **kwargs: i),
         ):
             loader.fetch_jira_issues(
                 datetime(2025, 1, 1, tzinfo=UTC),
@@ -249,9 +225,7 @@ class IncrementalFlushTests(unittest.TestCase):
                 "JIRA",
                 return_value=self._fake_jira([self._page(range(5), None)]),
             ),
-            patch.object(
-                loader, "enrich_issue_assets", side_effect=lambda i, **kwargs: i
-            ),
+            patch.object(loader, "enrich_issue_assets", side_effect=lambda i, **kwargs: i),
         ):
             issues = loader.fetch_jira_issues(
                 datetime(2025, 1, 1, tzinfo=UTC),
@@ -269,9 +243,7 @@ class EnrichmentFootprintTests(unittest.TestCase):
         issue = {
             "key": "SDAX-1",
             "fields": {
-                "customfield_10673": [
-                    {"objectId": "7", "workspaceId": loader.WORKSPACE_ID}
-                ]
+                "customfield_10673": [{"objectId": "7", "workspaceId": loader.WORKSPACE_ID}]
             },
         }
         asset = {
@@ -348,9 +320,7 @@ class TrimTests(unittest.TestCase):
 
     def test_dedupe_still_sees_the_updated_timestamp(self):
         trimmed = loader.trim_issue(self._full_issue())
-        self.assertEqual(
-            loader._issue_updated_ts(trimmed), datetime(2026, 8, 2, tzinfo=UTC)
-        )
+        self.assertEqual(loader._issue_updated_ts(trimmed), datetime(2026, 8, 2, tzinfo=UTC))
 
 
 def test_dedupe_compares_instants_not_strings() -> None:

@@ -31,27 +31,17 @@ def test_first_reference_and_workspace_policy_matches_adapters() -> None:
     assert parsed is not None and parsed.object_id == "1"
     assert parse_asset_reference([{"objectId": "1"}], tenant=tenant) is None
     assert (
-        parse_asset_reference(
-            [{"workspaceId": "foreign", "objectId": "1"}], tenant=tenant
-        )
-        is None
+        parse_asset_reference([{"workspaceId": "foreign", "objectId": "1"}], tenant=tenant) is None
     )
     assert parse_asset_reference("ID_1", tenant=tenant) is None
     parsed = parse_asset_reference("ID_1", tenant=tenant, legacy=True)
     assert parsed is not None and parsed.object_id == "1"
-    value = issue(
-        assets_cloud_id=tenant.cloud_id, assets_workspace_id=tenant.workspace_id
-    )
+    value = issue(assets_cloud_id=tenant.cloud_id, assets_workspace_id=tenant.workspace_id)
     value["fields"][desks.FIELDS.contact] = references
     assert (
-        export._object_id_for_field(
-            value["fields"], desks.FIELDS.contact, settings=config
-        )
-        == "1"
+        export._object_id_for_field(value["fields"], desks.FIELDS.contact, settings=config) == "1"
     )
-    frame = transform.load_project_issues(
-        "SDEU", [value], country_cache={}, settings=config
-    )
+    frame = transform.load_project_issues("SDEU", [value], country_cache={}, settings=config)
     assert frame.loc[0, "ansprechpartner"] == "ID_1"
     record = next(
         record
@@ -68,17 +58,11 @@ def test_rejected_modern_reference_never_falls_back_to_legacy(
 ) -> None:
     """Rejection survives extraction even if a bare-ID cache has a matching key."""
     tenant = load_settings({}).tenant
-    value = issue(
-        assets_cloud_id=tenant.cloud_id, assets_workspace_id=tenant.workspace_id
-    )
-    value["fields"][desks.FIELDS.contact] = [
-        {"objectId": "41", "workspaceId": workspace}
-    ]
+    value = issue(assets_cloud_id=tenant.cloud_id, assets_workspace_id=tenant.workspace_id)
+    value["fields"][desks.FIELDS.contact] = [{"objectId": "41", "workspaceId": workspace}]
     for field in (desks.FIELDS.branch, desks.FIELDS.central):
         value["fields"][field] = []
-    frame = transform.load_project_issues(
-        "SDEU", [value], country_cache={"41": "Wrong country"}
-    )
+    frame = transform.load_project_issues("SDEU", [value], country_cache={"41": "Wrong country"})
     assert frame.loc[0, "ansprechpartner"] == ""
     assert frame.loc[0, "Land"] == country.NOT_RESOLVED
     assert frame.loc[0, "asset_references"][0]["provenance"] == "rejected"
@@ -105,9 +89,7 @@ def test_country_outcomes_distinguish_empty_failure_and_unresolved(fault: str) -
     elif fault == "malformed_identity":
         fetch = Mock(return_value={"id": "another", "attributes": []})
     else:
-        fetch = Mock(
-            return_value={"id": "41", "attributes": "SYNTHETIC_PRIVATE_MARKER"}
-        )
+        fetch = Mock(return_value={"id": "41", "attributes": "SYNTHETIC_PRIVATE_MARKER"})
     result = resolve_country(identity, fetch=fetch)
     assert result.outcome == "failed" and result.country is None and result.error_code
     assert "SYNTHETIC_PRIVATE_MARKER" not in str(asdict(result))
@@ -151,9 +133,7 @@ def test_country_core_does_not_import_export_adapter(
 def test_legacy_schema_never_invents_structured_tenant_provenance() -> None:
     """An additive optional column represents old unknown references honestly."""
     frame = normalize_frame(
-        pd.DataFrame(
-            [{"key": "SDAX-1", "ansprechpartner": "ID_41", "Land": "Österreich"}]
-        )
+        pd.DataFrame([{"key": "SDAX-1", "ansprechpartner": "ID_41", "Land": "Österreich"}])
     )
     assert frame.loc[0, "Land"] == "Österreich"
     assert pd.isna(frame.loc[0, "asset_references"])
@@ -166,9 +146,7 @@ def test_country_asset_retries_follow_the_country_budget() -> None:
 
     tenant = load_settings({}).tenant
     identity = AssetIdentity(tenant.cloud_id, tenant.workspace_id, "41")
-    fetch = Mock(
-        side_effect=[requests.Timeout("synthetic"), {"id": "41", "attributes": []}]
-    )
+    fetch = Mock(side_effect=[requests.Timeout("synthetic"), {"id": "41", "attributes": []}])
     delays: list[float] = []
     assert fetch_country_asset(identity, fetch=fetch, sleep=delays.append)["id"] == "41"
     assert delays == [2] and fetch.call_count == 2

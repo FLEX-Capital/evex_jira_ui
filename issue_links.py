@@ -73,9 +73,7 @@ def fetch_link_graph(
             continue
         for key in batch:
             fields = result.get(key)
-            if not isinstance(fields, Mapping) or not isinstance(
-                fields.get("issuelinks"), list
-            ):
+            if not isinstance(fields, Mapping) or not isinstance(fields.get("issuelinks"), list):
                 diagnostics.append(
                     OperationDiagnostic(
                         operation_id,

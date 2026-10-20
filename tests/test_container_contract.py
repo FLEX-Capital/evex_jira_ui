@@ -39,9 +39,7 @@ def _disabled_protections(dockerfile_text: str, config_text: str) -> set[str]:
         parts = line.split(None, 1)
         instruction, body = parts[0], parts[1] if len(parts) > 1 else ""
         instruction = instruction.upper()
-        assert (
-            instruction != "ENTRYPOINT"
-        ), "New entrypoint requires explicit security review"
+        assert instruction != "ENTRYPOINT", "New entrypoint requires explicit security review"
         if instruction == "ENV":
             pairs = shlex.split(body, comments=True)
             if pairs and "=" not in pairs[0]:
@@ -54,19 +52,17 @@ def _disabled_protections(dockerfile_text: str, config_text: str) -> set[str]:
                     check(env_flags[name], value)
         elif instruction == "CMD":
             command = json.loads(body) if body.startswith("[") else ["sh", "-c", body]
-    assert isinstance(command, list) and all(
-        isinstance(x, str) for x in command
-    ), "Missing or unsupported runtime command"
+    assert isinstance(command, list) and all(isinstance(x, str) for x in command), (
+        "Missing or unsupported runtime command"
+    )
     if command[:2] in (["sh", "-c"], ["/bin/sh", "-c"]):
         assert len(command) == 3, "Unsupported shell arguments"
         # The one supported expansion is quoted as a whole argument, so PORT
         # cannot expand into additional Streamlit flags through shell splitting.
-        static = command[2].replace(
-            '"--server.port=${PORT:-8501}"', "--server.port=8501"
+        static = command[2].replace('"--server.port=${PORT:-8501}"', "--server.port=8501")
+        assert not any(char in static for char in "$`*?[]()\n\r\"'\\"), (
+            "Shell expansion requires explicit security review"
         )
-        assert not any(
-            char in static for char in "$`*?[]()\n\r\"'\\"
-        ), "Shell expansion requires explicit security review"
         lexer = shlex.shlex(static, posix=True, punctuation_chars=";&|<>")
         lexer.whitespace_split = True
         command = list(lexer)

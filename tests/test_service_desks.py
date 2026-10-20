@@ -54,15 +54,11 @@ class DeskTests(unittest.TestCase):
         start = desks.berlin_day_start(date(2026, 3, 29))
         end = desks.berlin_day_end(date(2026, 3, 29))
         self.assertEqual(desks.as_utc(start).isoformat(), "2026-03-28T23:00:00+00:00")
-        self.assertEqual(
-            desks.as_utc(end).isoformat(), "2026-03-29T21:59:59.999999+00:00"
-        )
+        self.assertEqual(desks.as_utc(end).isoformat(), "2026-03-29T21:59:59.999999+00:00")
 
     def test_selected_projects_dedupes_and_rejects_unknown_or_empty(self):
         self.assertEqual(desks.selected_projects(None), ("SDIPR", "SDAX", "SDEU"))
-        self.assertEqual(
-            desks.selected_projects(["SDEU", "SDAX", "SDEU"]), ("SDEU", "SDAX")
-        )
+        self.assertEqual(desks.selected_projects(["SDEU", "SDAX", "SDEU"]), ("SDEU", "SDAX"))
         for invalid in ([], ["UNKNOWN"]):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 desks.selected_projects(invalid)

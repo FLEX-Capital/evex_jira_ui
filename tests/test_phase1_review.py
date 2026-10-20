@@ -17,14 +17,10 @@ from data_transformation import load_issues_Euronet, upsert_jira_data
 from plotting import create_resolution_time_charts
 
 
-def test_mixed_legacy_refresh_preserves_completed_cohorts(
-    storage: Path, public_ui: None
-) -> None:
+def test_mixed_legacy_refresh_preserves_completed_cohorts(storage: Path, public_ui: None) -> None:
     """Real upsert of new rows cannot demote untouched legacy completed rows."""
     old = load_issues_Euronet([issue(main_id=None, sub_id=None)])
-    old = old.drop(
-        columns=["completion_state", "status_category_key", "duration_quality"]
-    )
+    old = old.drop(columns=["completion_state", "status_category_key", "duration_quality"])
     new = load_issues_Euronet([issue(key="SDEU-2", main_id=None, sub_id=None)])
     combined = upsert_jira_data(old, new)
     before = combined.copy(deep=True)
@@ -45,13 +41,8 @@ def test_mixed_legacy_refresh_preserves_completed_cohorts(
         app.sidebar.date_input[0].set_value((date(2026, 9, 1), date(2026, 9, 10))).run()
         app.checkbox(key="land_include_open").uncheck().run()
     assert not app.exception
-    country = [figure for figure in seen if figure.layout.xaxis.title.text == "Land"][
-        -1
-    ]
-    assert (
-        sum(int(n) for trace in country.data if trace.type == "bar" for n in trace.y)
-        == 2
-    )
+    country = [figure for figure in seen if figure.layout.xaxis.title.text == "Land"][-1]
+    assert sum(int(n) for trace in country.data if trace.type == "bar" for n in trace.y) == 2
     assert any("Abgeschlossen: 2" in c.value for c in app.caption)
     pd.testing.assert_frame_equal(combined, before)
 
@@ -80,14 +71,12 @@ def test_resume_retries_window_with_rejected_records(
 
 def test_loader_preserves_valid_mixed_timestamp_formats(storage: Path) -> None:
     """No preliminary conversion may discard valid formats before enrichment."""
-    first, second = issue(main_id=None, sub_id=None), issue(
-        key="SDEU-2", main_id=None, sub_id=None
-    )
+    first, second = issue(main_id=None, sub_id=None), issue(key="SDEU-2", main_id=None, sub_id=None)
     second["fields"]["created"] = "2026-09-01T08:00:00Z"
     second["fields"]["updated"] = "2026-09-01T14:00:00+02:00"
-    second["fields"]["customfield_10010"]["currentStatus"]["statusDate"][
-        "jira"
-    ] = "2026-09-01T12:00:00Z"
+    second["fields"]["customfield_10010"]["currentStatus"]["statusDate"]["jira"] = (
+        "2026-09-01T12:00:00Z"
+    )
     result = load_issues_Euronet([first, second])
     assert result.created.notna().all() and result.updated.notna().all()
     assert result.currentstatus_date.notna().all()

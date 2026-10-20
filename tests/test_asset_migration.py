@@ -83,16 +83,12 @@ class AssetMigrationTests(unittest.TestCase):
             return {"id": oid, "label": "Normal category"}
 
         result, report = asset_migration.migrate_categories(frame, fetch=fetch)
-        self.assertEqual(
-            result["Hauptkategorie"].tolist(), ["Normal category", "Normal category"]
-        )
+        self.assertEqual(result["Hauptkategorie"].tolist(), ["Normal category", "Normal category"])
         self.assertEqual(result["Unterkategorie"].tolist(), ["Unbekannt", "Unbekannt"])
         self.assertEqual(result["summary"].tolist(), ["keep", "keep"])
         self.assertEqual(result["has_exax_clone"].tolist(), [True, False])
         self.assertEqual(len(seen), 2)
-        self.assertTrue(
-            all(w == "9926cb30-3f07-4fb2-9c83-aa4fc551c721" for _, w, _ in seen)
-        )
+        self.assertTrue(all(w == "9926cb30-3f07-4fb2-9c83-aa4fc551c721" for _, w, _ in seen))
         self.assertEqual(report["failed_objects"], 1)
         self.assertNotIn("category_asset_errors", result.columns)
         self.assertEqual(len(frame.columns), 7)

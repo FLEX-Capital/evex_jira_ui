@@ -61,9 +61,7 @@ def test_cli_default_and_relative_windows_use_captured_now(flags, days):
     assert request.projects == ("SDIPR", "SDAX", "SDEU")
 
 
-def test_cli_unresolved_categories_and_busy_import_return_nonzero(
-    tmp_path, monkeypatch
-):
+def test_cli_unresolved_categories_and_busy_import_return_nonzero(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     report = desk_sync.SyncReport(categories=CategoryRepairReport(unresolved_cells=1))
     with patch.object(backfill, "run_sync", return_value=report):
@@ -72,9 +70,7 @@ def test_cli_unresolved_categories_and_busy_import_return_nonzero(
         assert backfill.main(["--days", "7"]) == 1
 
 
-def test_cli_runs_real_core_without_a_browser_or_writes_outside_its_storage(
-    tmp_path, monkeypatch
-):
+def test_cli_runs_real_core_without_a_browser_or_writes_outside_its_storage(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setattr(sync_checkpoints, "fetch_jira_issues", lambda *a, **k: [])
     assert backfill.main(["--project", "SDAX", "--days", "7"]) == 0

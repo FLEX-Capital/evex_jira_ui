@@ -113,14 +113,10 @@ def _entry_order(entry: CountryEntry) -> tuple[datetime, str]:
     return entry.fetched_at, record_hash
 
 
-def choose_country_entry(
-    current: CountryEntry | None, incoming: CountryEntry
-) -> CountryEntry:
+def choose_country_entry(current: CountryEntry | None, incoming: CountryEntry) -> CountryEntry:
     """Choose newest UTC time, then canonical-record hash for an exact tie."""
     return (
-        incoming
-        if current is None or _entry_order(incoming) > _entry_order(current)
-        else current
+        incoming if current is None or _entry_order(incoming) > _entry_order(current) else current
     )
 
 
@@ -152,9 +148,7 @@ def _decode(payload: bytes) -> tuple[CountryCache, int | None]:
         if not isinstance(value, dict):
             raise CountryCacheError("invalid_entry")
         try:
-            identity = AssetIdentity(
-                value["cloud_id"], value["workspace_id"], value["object_id"]
-            )
+            identity = AssetIdentity(value["cloud_id"], value["workspace_id"], value["object_id"])
             entry = CountryEntry(
                 identity,
                 value["outcome"],
@@ -195,9 +189,7 @@ def _envelope(cache: CountryCache) -> dict[str, Any]:
 
 
 def _backup_original(path: Path, payload: bytes) -> Path:
-    backup = path.with_name(
-        f"{path.name}.bak-country-{datetime.now(UTC):%Y%m%d-%H%M%S-%f}"
-    )
+    backup = path.with_name(f"{path.name}.bak-country-{datetime.now(UTC):%Y%m%d-%H%M%S-%f}")
     if backup.exists():
         raise CountryCacheError("backup_conflict")
 
@@ -259,11 +251,7 @@ def merge_country_entries(
                         updated.legacy_unverified[key] = after_value
                     else:
                         raise CountryCacheError("invalid_legacy_metadata")
-        if (
-            version == COUNTRY_CACHE_VERSION
-            and updated == current
-            and payload is not None
-        ):
+        if version == COUNTRY_CACHE_VERSION and updated == current and payload is not None:
             return current
         if version is None and payload is not None:
             _backup_original(path, payload)

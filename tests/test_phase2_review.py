@@ -104,7 +104,4 @@ def test_country_backfill_keeps_one_snapshot_through_publication(
     monkeypatch.setattr(sys, "argv", ["backfill_country.py"])
     backfill_country.main()
     assert seen["resolver"].keywords["settings"] == captured
-    assert (
-        data_loading.load_data(settings=captured).attrs[TENANT_ATTR]
-        == captured.tenant.as_dict()
-    )
+    assert data_loading.load_data(settings=captured).attrs[TENANT_ATTR] == captured.tenant.as_dict()

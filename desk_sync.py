@@ -46,15 +46,9 @@ def merge_import(current, incoming, baseline):
     overlap = cached.index.intersection(fresh.index)
     protected = pd.Index([])
     if "updated" in cached and "updated" in fresh:
-        old_times = pd.to_datetime(
-            cached.loc[overlap, "updated"], errors="coerce", utc=True
-        )
-        new_times = pd.to_datetime(
-            fresh.loc[overlap, "updated"], errors="coerce", utc=True
-        )
-        protected = overlap[
-            old_times.notna() & (new_times.isna() | (old_times > new_times))
-        ]
+        old_times = pd.to_datetime(cached.loc[overlap, "updated"], errors="coerce", utc=True)
+        new_times = pd.to_datetime(fresh.loc[overlap, "updated"], errors="coerce", utc=True)
+        protected = overlap[old_times.notna() & (new_times.isna() | (old_times > new_times))]
     if not baseline.empty and "key" in baseline:
         before = baseline.drop_duplicates("key", keep="last").set_index("key")
         shared = overlap.intersection(before.index)
@@ -73,6 +67,8 @@ def merge_import(current, incoming, baseline):
 
 @dataclass(frozen=True)
 class SyncRequest:
+    """An immutable selected-desk import window and checkpoint intent."""
+
     start: datetime
     end: datetime
     projects: tuple[str, ...]
@@ -81,6 +77,7 @@ class SyncRequest:
     publish_raw: bool = False
 
     def to_dict(self):
+        """Serialize this request or report into the shared status artifact format."""
         return {
             **asdict(self),
             "start": self.start.isoformat(),
@@ -91,6 +88,7 @@ class SyncRequest:
 def make_sync_request(
     start, end, projects=None, *, resume=False, repair_sources=False, publish_raw=False
 ):
+    """Validate and capture selected desks and an exact UTC import window."""
     from service_desks import BERLIN, as_utc, selected_projects
 
     now = datetime.now(UTC)
@@ -99,13 +97,13 @@ def make_sync_request(
         end = min(end, now)
     if start > end:
         raise ValueError("Das Startdatum muss vor oder auf dem Enddatum liegen.")
-    return SyncRequest(
-        start, end, selected_projects(projects), resume, repair_sources, publish_raw
-    )
+    return SyncRequest(start, end, selected_projects(projects), resume, repair_sources, publish_raw)
 
 
 @dataclass
 class SyncReport:
+    """Aggregate per-desk outcomes and publication failures from one shared import."""
+
     counts: dict = field(default_factory=dict)
     errors: dict = field(default_factory=dict)
     asset_failures: dict = field(default_factory=dict)
@@ -124,6 +122,7 @@ class SyncReport:
 
     @property
     def complete(self):
+        """Report whether every required stage finished without rejected or failed rows."""
         return not (
             self.errors
             or any(self.asset_failures.values())
@@ -137,10 +136,12 @@ class SyncReport:
         )
 
     def to_dict(self):
+        """Serialize this request or report into the shared status artifact format."""
         return {**asdict(self), "complete": self.complete}
 
 
 def status_path(data_path):
+    """Resolve the shared import status beside the selected ticket cache."""
     return Path(data_path).parent / "import_status.json"
 
 
@@ -190,8 +191,7 @@ def _keep_valid_category_labels(baseline, incoming, references, *, settings=None
             if (
                 refs
                 and refs[0].get("workspaceId") == tenant.workspace_id
-                and text_value(row.get(id_col))
-                == text_value(prior.loc[key].get(id_col))
+                and text_value(row.get(id_col)) == text_value(prior.loc[key].get(id_col))
                 and unknown(row.get(label_col))
                 and not unknown(prior.loc[key].get(label_col))
             ):
@@ -254,9 +254,7 @@ def _remaining_asset_failure(errors, resolver):
             prefix = f"{field_name}/"
             if error.startswith(prefix):
                 oid = error[len(prefix) :].split(":", 1)[0]
-                lookup = resolver.results.get(
-                    (tenant.cloud_id, tenant.workspace_id, oid)
-                )
+                lookup = resolver.results.get((tenant.cloud_id, tenant.workspace_id, oid))
                 repaired = lookup is not None and lookup.label is not None
         if not repaired:
             return True
@@ -364,22 +362,16 @@ def run_sync(request, *, progress=None, data_path=None):
         emit("Import wird gestartet", "admitted")
         stage = "fetch"
         try:
-            baseline, _ = data_loading.load_data_snapshot(
-                path=data_path, settings=config
-            )
+            baseline, _ = data_loading.load_data_snapshot(path=data_path, settings=config)
             baseline = baseline if baseline is not None else pd.DataFrame()
             frames, references, failures = [], {}, {}
             from asset_country import load_cache
 
-            country_cache = load_cache(
-                data_path.parent / "asset_country.json", settings=config
-            )
+            country_cache = load_cache(data_path.parent / "asset_country.json", settings=config)
             resolver = CategoryResolver(settings=config)
 
             def invalid_row(event: InvalidIssue) -> None:
-                report.invalid_rows[event.project] = (
-                    report.invalid_rows.get(event.project, 0) + 1
-                )
+                report.invalid_rows[event.project] = report.invalid_rows.get(event.project, 0) + 1
                 report.diagnostics.append(
                     OperationDiagnostic(
                         status["run_id"],
@@ -394,21 +386,13 @@ def run_sync(request, *, progress=None, data_path=None):
             link_errors: dict[str, Exception] = {}
 
             def fetch_links(keys: Sequence[str]) -> dict[str, Any]:
-                missing = [
-                    key
-                    for key in keys
-                    if key not in link_fields and key not in link_errors
-                ]
+                missing = [key for key in keys if key not in link_fields and key not in link_errors]
                 if missing:
                     try:
-                        received = fetch_issue_fields(
-                            missing, ["issuelinks"], settings=config
-                        )
+                        received = fetch_issue_fields(missing, ["issuelinks"], settings=config)
                         for key in missing:
                             link_fields[key] = received.get(key)
-                    except (
-                        Exception
-                    ) as exc:  # noqa: BLE001 - reuse a failed batch within this import
+                    except Exception as exc:  # noqa: BLE001 - reuse a failed batch within this import
                         for key in missing:
                             link_errors[key] = exc
                 # fetch_link_graph handles each optional batch failure without dropping tickets.
@@ -431,9 +415,7 @@ def run_sync(request, *, progress=None, data_path=None):
                         category_resolver=resolver,
                         settings=config,
                         invalid_row_cb=invalid_row,
-                        progress=lambda message, project=project: emit(
-                            message, project=project
-                        ),
+                        progress=lambda message, project=project: emit(message, project=project),
                     )
                     for value in issues:
                         link_fields[value["key"]] = value.get("fields") or {}
@@ -470,18 +452,14 @@ def run_sync(request, *, progress=None, data_path=None):
                             )
                         )
                     failures[project] = [
-                        i.get("asset_errors", [])
-                        for i in issues
-                        if i.get("asset_errors")
+                        i.get("asset_errors", []) for i in issues if i.get("asset_errors")
                     ]
                     report.counts[project] = len(issues)
                     del issues
                 except Exception as exc:  # noqa: BLE001 - isolate a failed desk
                     report.errors[project] = diagnose(exc, stage, project)
             if report.counts:
-                incoming = (
-                    pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-                )
+                incoming = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
                 incoming = _keep_known_links(baseline, incoming)
                 incoming = _keep_valid_category_labels(
                     baseline, incoming, references, settings=config
@@ -528,9 +506,7 @@ def run_sync(request, *, progress=None, data_path=None):
                         path=data_path, settings=config
                     )
                     current = current if current is not None else pd.DataFrame()
-                    merged, report.protected_rows = merge_import(
-                        current, incoming, baseline
-                    )
+                    merged, report.protected_rows = merge_import(current, incoming, baseline)
                     before_repairs = merged.copy()
                     merged, report.categories.skipped_cells = apply_category_repairs(
                         merged, patches
@@ -543,8 +519,7 @@ def run_sync(request, *, progress=None, data_path=None):
                         if (
                             len(before) == len(after) == 1
                             and unknown(before.iloc[0].get(patch.label_column))
-                            and text_value(after.iloc[0].get(patch.label_column))
-                            == patch.label
+                            and text_value(after.iloc[0].get(patch.label_column)) == patch.label
                         ):
                             if patch.label == "Nicht zugeordnet":
                                 report.categories.unassigned_cells += 1
@@ -554,13 +529,9 @@ def run_sync(request, *, progress=None, data_path=None):
                         indexes = merged.index[merged["key"] == key]
                         if len(indexes) == 1:
                             index = indexes[0]
-                            if not text_value(
-                                merged.loc[index].get("source")
-                            ) and text_value(
+                            if not text_value(merged.loc[index].get("source")) and text_value(
                                 merged.loc[index].get("updated")
-                            ) == text_value(
-                                expected_updated
-                            ):
+                            ) == text_value(expected_updated):
                                 merged.loc[index, "source"] = source
                                 report.source_updates += 1
                     report.categories.unresolved_cells = unresolved_cells(merged)
@@ -585,17 +556,13 @@ def run_sync(request, *, progress=None, data_path=None):
                             run_id=status["run_id"],
                             request=request,
                         )
-                    except (
-                        Exception
-                    ) as exc:  # noqa: BLE001 - cache was already committed
+                    except Exception as exc:  # noqa: BLE001 - cache was already committed
                         report.raw_error = diagnose(exc, "raw")
         except Exception as exc:  # noqa: BLE001 - persist failure before releasing lock
             report.save_error = diagnose(exc, stage)
         status["report"] = report.to_dict()
         status["state"] = (
-            "completed"
-            if report.complete
-            else ("partial" if report.committed else "failed")
+            "completed" if report.complete else ("partial" if report.committed else "failed")
         )
         status["cache_revision"] = report.cache_revision
         write_json_atomic(status_path(data_path), status)

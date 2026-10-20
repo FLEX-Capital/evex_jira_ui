@@ -158,9 +158,7 @@ class CleanupPlan:
 class CleanupError(RuntimeError):
     """Safe partial progress when cleanup cannot finish its approved plan."""
 
-    def __init__(
-        self, code: str, deleted: tuple[Path, ...], failed: tuple[Path, ...]
-    ) -> None:
+    def __init__(self, code: str, deleted: tuple[Path, ...], failed: tuple[Path, ...]) -> None:
         self.code = code
         self.deleted = deleted
         self.failed = failed
@@ -218,17 +216,14 @@ def _cleanup_scan(paths: DataPaths, *, now: datetime) -> tuple[CleanupPlan, Inve
         matched = backup_pattern.fullmatch(name)
         if stat.S_ISREG(mode) and matched:
             try:
-                timestamp = datetime.strptime(
-                    matched.group(1), "%Y%m%d-%H%M%S-%f"
-                ).replace(tzinfo=UTC)
+                timestamp = datetime.strptime(matched.group(1), "%Y%m%d-%H%M%S-%f").replace(
+                    tzinfo=UTC
+                )
             except ValueError:
                 continue
             backups.append((name, timestamp))
     newest = {
-        name
-        for name, _ in sorted(
-            backups, key=lambda item: (-item[1].timestamp(), item[0])
-        )[:10]
+        name for name, _ in sorted(backups, key=lambda item: (-item[1].timestamp(), item[0]))[:10]
     }
     candidates = []
     for name, timestamp in backups:
@@ -247,24 +242,18 @@ def _cleanup_scan(paths: DataPaths, *, now: datetime) -> tuple[CleanupPlan, Inve
         for target, family in targets.items():
             # mkstemp currently emits eight alphanumeric/underscore characters;
             # accept longer owned identifiers, never arbitrary .tmp suffixes.
-            if re.fullmatch(
-                rf"\.evex-atomic-{re.escape(target)}-[A-Za-z0-9_-]{{8,}}\.tmp", name
-            ):
-                if now - datetime.fromtimestamp(
-                    revision[2] / 1_000_000_000, UTC
-                ) > timedelta(hours=24):
+            if re.fullmatch(rf"\.evex-atomic-{re.escape(target)}-[A-Za-z0-9_-]{{8,}}\.tmp", name):
+                if now - datetime.fromtimestamp(revision[2] / 1_000_000_000, UTC) > timedelta(
+                    hours=24
+                ):
                     candidates.append(
-                        CleanupCandidate(
-                            paths.root / name, revision, family, "abandoned_temporary"
-                        )
+                        CleanupCandidate(paths.root / name, revision, family, "abandoned_temporary")
                     )
                 break
     ordered = tuple(sorted(candidates, key=lambda candidate: candidate.path.name))
     chosen = {candidate.path.name for candidate in ordered}
     protected = tuple(
-        sorted(
-            [paths.root / name for name in entries if name not in chosen] + list(locks)
-        )
+        sorted([paths.root / name for name in entries if name not in chosen] + list(locks))
     )
     signature = {
         "root": str(paths.root),
@@ -272,9 +261,7 @@ def _cleanup_scan(paths: DataPaths, *, now: datetime) -> tuple[CleanupPlan, Inve
         "entries": entries,
         "candidates": [asdict(candidate) for candidate in ordered],
     }
-    digest = hashlib.sha256(
-        json.dumps(signature, sort_keys=True, default=str).encode()
-    ).hexdigest()
+    digest = hashlib.sha256(json.dumps(signature, sort_keys=True, default=str).encode()).hexdigest()
     return CleanupPlan(ordered, protected, digest), entries
 
 
@@ -301,9 +288,7 @@ def _owner_lock(family: Family, paths: DataPaths) -> Iterator[None]:
             yield
 
 
-def apply_cleanup(
-    plan: CleanupPlan, paths: DataPaths, *, now: datetime
-) -> tuple[Path, ...]:
+def apply_cleanup(plan: CleanupPlan, paths: DataPaths, *, now: datetime) -> tuple[Path, ...]:
     """Delete only reviewed candidates after all-owner preflight and revalidation.
 
     Args:
@@ -333,9 +318,7 @@ def apply_cleanup(
                 raise CacheChangedError("cleanup_inventory_changed")
     deleted: list[Path] = []
     for family in families:
-        selected = [
-            candidate for candidate in plan.candidates if candidate.family == family
-        ]
+        selected = [candidate for candidate in plan.candidates if candidate.family == family]
         if not selected:
             continue
         try:
@@ -355,9 +338,7 @@ def apply_cleanup(
             if deleted:
                 code = (
                     "cleanup_interrupted"
-                    if isinstance(
-                        exc, (CacheChangedError, ImportBusyError, BlockingIOError)
-                    )
+                    if isinstance(exc, (CacheChangedError, ImportBusyError, BlockingIOError))
                     else "cleanup_io_failed"
                 )
                 raise CleanupError(

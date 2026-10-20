@@ -84,9 +84,7 @@ def _fetch_asset_with_retry(
             value.cloud_id, value.workspace_id, value.object_id, settings=config
         )
 
-    return dict(
-        country_policy.fetch_country_asset(identity, fetch=fetch, settings=config)
-    )
+    return dict(country_policy.fetch_country_asset(identity, fetch=fetch, settings=config))
 
 
 def resolve_asset_country_strict(
@@ -118,16 +116,12 @@ def resolve_asset_country(
 ) -> str | None:
     """Compatibility optional-country result; failures are never memoized."""
     try:
-        return resolve_asset_country_strict(
-            object_id, cloud_id, workspace_id, settings=settings
-        )
+        return resolve_asset_country_strict(object_id, cloud_id, workspace_id, settings=settings)
     except country_policy.CountryResolutionError:
         return None
 
 
-def _country_lookup(
-    identity: AssetIdentity, config: Settings
-) -> country_policy.CountryLookup:
+def _country_lookup(identity: AssetIdentity, config: Settings) -> country_policy.CountryLookup:
     return country_policy.resolve_country(
         identity,
         fetch=lambda value: _fetch_asset_with_retry(
@@ -195,10 +189,7 @@ def load_issues(
         end_dt = min(berlin_day_end(end_day), requested_at)
         if start_dt > end_dt or project not in desks.BY_KEY or max_issues <= 0:
             raise ValueError("invalid_export_selection")
-        print(
-            f"Re-fetching issues from Jira: project={project} "
-            f"{start}..{end} (max {max_issues})"
-        )
+        print(f"Re-fetching issues from Jira: project={project} {start}..{end} (max {max_issues})")
         return fetch_jira_issues(
             start_dt,
             end_dt,
@@ -208,9 +199,7 @@ def load_issues(
             settings=settings,
         )
     if not os.path.exists(input_path):
-        raise FileNotFoundError(
-            f"{input_path} not found. Run with --refetch to pull from Jira."
-        )
+        raise FileNotFoundError(f"{input_path} not found. Run with --refetch to pull from Jira.")
     print(f"Loading issues from {input_path}")
     with open(input_path) as f:
         return validate_search_page({"issues": json.load(f)})["issues"]
@@ -228,9 +217,7 @@ def prefetch_asset_countries(
         {
             identity
             for issue in issues
-            for _, identity in country_policy.country_references(
-                issue, tenant=config.tenant
-            )
+            for _, identity in country_policy.country_references(issue, tenant=config.tenant)
             if identity is not None
         },
         key=lambda identity: (
@@ -267,9 +254,7 @@ def resolve_country_report(
         Country mapping plus safe causes; verified empty attributes are complete.
     """
     config = settings or load_settings()
-    records = validate_search_page({"issues": [dict(issue) for issue in issues]})[
-        "issues"
-    ]
+    records = validate_search_page({"issues": [dict(issue) for issue in issues]})["issues"]
     outcomes = prefetch_asset_countries(records, settings=config)
     countries: dict[str, str | None] = {}
     diagnostics: list[OperationDiagnostic] = []
@@ -278,9 +263,7 @@ def resolve_country_report(
         key = issue["key"]
         countries[key] = country_for_issue(issue, settings=config, outcomes=outcomes)
         seen: set[tuple[AssetIdentity | None, str]] = set()
-        for _, identity in country_policy.country_references(
-            issue, tenant=config.tenant
-        ):
+        for _, identity in country_policy.country_references(issue, tenant=config.tenant):
             lookup = outcomes.get(identity) if identity is not None else None
             if lookup is not None and lookup.outcome in ("found", "no_country"):
                 continue
@@ -298,8 +281,7 @@ def resolve_country_report(
                     code,
                     project=key.split("-")[0],
                     key=key,
-                    retryable=code
-                    in {"timeout", "connection", "rate_limited", "deferred"},
+                    retryable=code in {"timeout", "connection", "rate_limited", "deferred"},
                 )
             )
     return CountryExportResult(countries, tuple(diagnostics))
@@ -347,9 +329,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         default="SDAX",
         help="Project key to fetch when --refetch (default: SDAX)",
     )
-    parser.add_argument(
-        "--start", default="2025-01-01", help="Start date YYYY-MM-DD for --refetch"
-    )
+    parser.add_argument("--start", default="2025-01-01", help="Start date YYYY-MM-DD for --refetch")
     parser.add_argument(
         "--end",
         default=None,
@@ -387,9 +367,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         cause = safe_diagnostic(exc, operation_id=uuid4().hex, stage="fetch")
         print(f"Country export incomplete ({cause.code}).")
         return 1
-    frame = pd.DataFrame(
-        list(result.countries.items()), columns=["Jira Issue ID", "Country"]
-    )
+    frame = pd.DataFrame(list(result.countries.items()), columns=["Jira Issue ID", "Country"])
     counts = Counter(cause.code for cause in result.diagnostics)
     print(
         f"Countries: {int(frame['Country'].notna().sum())}/{len(frame)}; "
@@ -400,9 +378,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         atomic_write(
             Path(args.output),
-            lambda handle: frame.to_excel(
-                handle, index=False, sheet_name="Issue Country"
-            ),
+            lambda handle: frame.to_excel(handle, index=False, sheet_name="Issue Country"),
         )
     except (OSError, AtomicWriteError):
         print("Country workbook publication failed (save_failed).")

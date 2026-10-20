@@ -16,6 +16,7 @@ from settings import load_settings
 
 
 def migrate_categories(frame, *, fetch=None, workers=4, settings=None):
+    """Resolve legacy category labels on a copy using the captured tenant."""
     config = settings or load_settings()
     tenant = config.tenant
     fetch = fetch or partial(fetch_asset_object, settings=config)
@@ -46,9 +47,7 @@ def migrate_categories(frame, *, fetch=None, workers=4, settings=None):
         ("main_category_id", "Hauptkategorie"),
         ("sub_category_id", "Unterkategorie"),
     ]:
-        result[target] = (
-            result[source].fillna("").astype(str).map(labels).fillna("Unbekannt")
-        )
+        result[target] = result[source].fillna("").astype(str).map(labels).fillna("Unbekannt")
     return result, {
         "objects": len(ids),
         "failed_objects": len(errors),
@@ -57,6 +56,7 @@ def migrate_categories(frame, *, fetch=None, workers=4, settings=None):
 
 
 def main():
+    """Run the explicit category migration with revision protection and backup."""
     from data_loading import load_data_snapshot, save_data_if_unchanged
 
     config = load_settings()

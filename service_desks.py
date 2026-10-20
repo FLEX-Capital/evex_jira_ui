@@ -14,6 +14,8 @@ EARLIEST_DAY = date(1970, 1, 1)
 
 @dataclass(frozen=True)
 class ServiceDesk:
+    """A supported desk and its immutable reporting/import configuration."""
+
     key: str
     label: str
     company: str
@@ -26,12 +28,8 @@ class ServiceDesk:
 
 
 DESKS = (
-    ServiceDesk(
-        "SDIPR", "Ipro", "IPRO", clone_project="EXIPR", comment_separator="\n\n"
-    ),
-    ServiceDesk(
-        "SDAX", "Amparex", "Amparex", clone_project="EXAX", clone_of_clone_project="AX"
-    ),
+    ServiceDesk("SDIPR", "Ipro", "IPRO", clone_project="EXIPR", comment_separator="\n\n"),
+    ServiceDesk("SDAX", "Amparex", "Amparex", clone_project="EXAX", clone_of_clone_project="AX"),
     ServiceDesk(
         "SDEU",
         "Euronet",
@@ -71,9 +69,7 @@ class JiraFields:
             "issuelinks",
             "comment",
         )
-        return tuple(
-            dict.fromkeys((*standard, *(getattr(self, f.name) for f in fields(self))))
-        )
+        return tuple(dict.fromkeys((*standard, *(getattr(self, f.name) for f in fields(self)))))
 
 
 FIELDS = JiraFields()
@@ -96,6 +92,7 @@ def selected_projects(projects=None):
 
 
 def berlin_day_start(day):
+    """Return the first instant of a Berlin calendar day."""
     return datetime.combine(day, time.min, tzinfo=BERLIN)
 
 
@@ -112,6 +109,7 @@ def as_utc(value):
 
 
 def effective_start(project, start):
+    """Apply the selected desk's earliest supported creation date to the UTC window."""
     start = as_utc(start) if start is not None else None
     desk = BY_KEY.get(project)
     cutoff = as_utc(desk.earliest_created) if desk and desk.earliest_created else None
@@ -119,6 +117,7 @@ def effective_start(project, start):
 
 
 def filter_companies(frame, labels):
+    """Select the companies belonging to the chosen service-desk labels."""
     companies = [desk.company for desk in DESKS if desk.label in labels]
     return frame.loc[frame["firma"].isin(companies)].copy()
 

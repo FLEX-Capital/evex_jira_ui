@@ -200,9 +200,7 @@ def load_settings(
         paths=paths,
         tenant=TenantIdentity(
             _identity(env.get("JIRA_CLOUD_ID"), DEFAULT_CLOUD_ID, "JIRA_CLOUD_ID"),
-            _identity(
-                env.get("JIRA_WORKSPACE_ID"), DEFAULT_WORKSPACE_ID, "JIRA_WORKSPACE_ID"
-            ),
+            _identity(env.get("JIRA_WORKSPACE_ID"), DEFAULT_WORKSPACE_ID, "JIRA_WORKSPACE_ID"),
         ),
         ui_password=env.get("UI_PASSWORD") or None,
         jira_url=_url(env.get("JIRA_URL"), "JIRA_URL"),
@@ -212,6 +210,5 @@ def load_settings(
         azure_api_key=env.get("AZURE_OPENAI_API_KEY") or None,
         azure_deployment=_clean(env.get("AZURE_OPENAI_DEPLOYMENT_NAME"))
         or _clean(env.get("AZURE_OPENAI_DEPLOYMENT")),
-        azure_api_version=_clean(env.get("AZURE_OPENAI_API_VERSION"))
-        or DEFAULT_API_VERSION,
+        azure_api_version=_clean(env.get("AZURE_OPENAI_API_VERSION")) or DEFAULT_API_VERSION,
     )

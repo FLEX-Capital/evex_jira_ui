@@ -36,10 +36,7 @@ def test_retry_after_numeric_date_and_falsey_response(header: str) -> None:
     assert not error.response
     operation = Mock(side_effect=[error, "success"])
     delays: list[float] = []
-    assert (
-        with_retries(operation, policy=SOURCE, now=lambda: NOW, sleep=delays.append)
-        == "success"
-    )
+    assert with_retries(operation, policy=SOURCE, now=lambda: NOW, sleep=delays.append) == "success"
     assert operation.call_count == 2 and delays == [120]
 
 
@@ -71,9 +68,7 @@ def test_excess_delay_defers_and_permanent_errors_do_not_retry() -> None:
     ):
         operation = Mock(side_effect=error)
         with pytest.raises(type(error)):
-            with_retries(
-                operation, policy=CATEGORY, now=lambda: NOW, sleep=delays.append
-            )
+            with_retries(operation, policy=CATEGORY, now=lambda: NOW, sleep=delays.append)
         assert operation.call_count == 1 and not delays
 
 
@@ -141,15 +136,11 @@ def test_category_deferred_wait_and_http_date_use_shared_policy() -> None:
             {"id": "41", "label": "Resolved"},
         ]
     )
-    resolver = category_sync.CategoryResolver(
-        fetch=fetch, sleep=delays.append, now=lambda: NOW
-    )
+    resolver = category_sync.CategoryResolver(fetch=fetch, sleep=delays.append, now=lambda: NOW)
     value = resolver.resolve(config.tenant.cloud_id, config.tenant.workspace_id, "41")
     assert value.label == "Resolved" and value.attempts == 2 and delays == [120]
     fetch = Mock(side_effect=_http_error(429, "301"))
-    resolver = category_sync.CategoryResolver(
-        fetch=fetch, sleep=delays.append, now=lambda: NOW
-    )
+    resolver = category_sync.CategoryResolver(fetch=fetch, sleep=delays.append, now=lambda: NOW)
     value = resolver.resolve(config.tenant.cloud_id, config.tenant.workspace_id, "41")
     assert value.label is None and value.error == "deferred" and value.attempts == 1
     assert fetch.call_count == 1 and delays == [120]
@@ -192,11 +183,7 @@ def test_source_search_keeps_omitted_keys_distinct_and_rejects_repeated_tokens(
 
     _session(
         monkeypatch,
-        {
-            "issues": [
-                {"key": "SDAX-1", "fields": {"customfield_10675": {"value": "Portal"}}}
-            ]
-        },
+        {"issues": [{"key": "SDAX-1", "fields": {"customfield_10675": {"value": "Portal"}}}]},
     )
     assert source_sync.fetch_issue_sources(["SDAX-1", "SDAX-2"]) == {"SDAX-1": "Portal"}
     _session(

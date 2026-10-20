@@ -44,9 +44,7 @@ def _run(monkeypatch, *argv):
     backfill_country.main()
 
 
-def test_backup_is_taken_when_output_is_the_input_spelled_differently(
-    workspace, monkeypatch
-):
+def test_backup_is_taken_when_output_is_the_input_spelled_differently(workspace, monkeypatch):
     """The backup guard must compare paths, not strings.
 
     main() and write_pickle_atomically() both decide "is this the file we read
@@ -56,9 +54,7 @@ def test_backup_is_taken_when_output_is_the_input_spelled_differently(
     source, cache = workspace
     aliased = f"{source.parent}/./{source.name}"
 
-    _run(
-        monkeypatch, "--input", str(source), "--output", aliased, "--cache", str(cache)
-    )
+    _run(monkeypatch, "--input", str(source), "--output", aliased, "--cache", str(cache))
 
     backups = list(source.parent.glob("*.bak-*"))
     assert backups, "overwrote the input without taking a backup"
@@ -101,8 +97,7 @@ def test_country_maintenance_keeps_concurrent_ticket_changes(
     current = pd.read_pickle(source).iloc[0]
     assert current.summary == "concurrent Jira value"
     assert (
-        current.ansprechpartner == "ID_changed"
-        and current.Hauptkategorie == "concurrent category"
+        current.ansprechpartner == "ID_changed" and current.Hauptkategorie == "concurrent category"
     )
     assert asset_country.load_cache(cache).entries
 

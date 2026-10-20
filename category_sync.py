@@ -19,20 +19,25 @@ UNASSIGNED = "Nicht zugeordnet"
 
 
 def text_value(value):
+    """Normalize a scalar category cell into trimmed text."""
     return "" if value is None or pd.isna(value) else str(value).strip()
 
 
 def unknown(value):
+    """Recognize the documented empty or unknown category labels."""
     return text_value(value).casefold() in {"", "unknown", "unbekannt"}
 
 
 def timestamp(value):
+    """Normalize a comparison timestamp into an aware UTC value."""
     value = pd.to_datetime(value, errors="coerce", utc=True)
     return None if pd.isna(value) else value
 
 
 @dataclass(frozen=True)
 class CategoryLookup:
+    """A resolved label or safe lookup error for one Assets identity."""
+
     label: str | None
     error: str | None
     attempts: int
@@ -56,6 +61,7 @@ class CategoryResolver:
         self.results: dict[tuple[str, str, str], CategoryLookup] = {}
 
     def resolve(self, cloud_id, workspace_id, object_id):
+        """Resolve one captured tenant identity, reusing this operation's lookup result."""
         identity = (cloud_id, workspace_id, str(object_id))
         if identity in self.results:
             return self.results[identity]
@@ -78,9 +84,7 @@ class CategoryResolver:
             return label
 
         try:
-            label = with_retries(
-                lookup, policy=CATEGORY, now=self.now, sleep=self.sleep
-            )
+            label = with_retries(lookup, policy=CATEGORY, now=self.now, sleep=self.sleep)
             result = CategoryLookup(label, None, attempts)
         except RetryDeferred:
             result = CategoryLookup(None, "deferred", attempts)
@@ -95,6 +99,7 @@ class CategoryResolver:
 
 
 def fetch_category_references(keys, *, settings=None):
+    """Fetch the category fields needed for explicit repair of selected ticket keys."""
     from source_sync import fetch_issue_fields
 
     return fetch_issue_fields(
@@ -104,6 +109,8 @@ def fetch_category_references(keys, *, settings=None):
 
 @dataclass(frozen=True)
 class CategoryPatch:
+    """A prepared category change tied to the ticket and reference being repaired."""
+
     key: str
     label_column: str
     id_column: str
@@ -117,6 +124,8 @@ class CategoryPatch:
 
 @dataclass
 class CategoryRepairReport:
+    """Aggregate repair counts and safe failures without ticket payloads."""
+
     repaired_cells: int = 0
     unassigned_cells: int = 0
     unresolved_cells: int = 0
@@ -127,6 +136,7 @@ class CategoryRepairReport:
 def prepare_category_repairs(
     frame, *, references=None, resolver=None, reference_loader=None, settings=None
 ):
+    """Prepare category patches from captured rows without holding ticket-cache locks."""
     config = settings or getattr(resolver, "settings", None) or load_settings()
     tenant = config.tenant
     resolver = resolver or CategoryResolver(settings=config)
@@ -134,21 +144,16 @@ def prepare_category_repairs(
     candidates = []
     for _, row in frame.iterrows():
         for raw_field, id_column, label_column in desks.category_fields():
-            if (id_column in frame or label_column in frame) and unknown(
-                row.get(label_column)
-            ):
+            if (id_column in frame or label_column in frame) and unknown(row.get(label_column)):
                 candidates.append((row, raw_field, id_column, label_column))
-    missing_keys = sorted(
-        {text_value(r.get("key")) for r, *_ in candidates} - references.keys()
-    )
+    missing_keys = sorted({text_value(r.get("key")) for r, *_ in candidates} - references.keys())
     reference_error = "Jira category reference was not returned"
     if missing_keys:
         try:
             references.update(
-                (
-                    reference_loader
-                    or partial(fetch_category_references, settings=config)
-                )(missing_keys)
+                (reference_loader or partial(fetch_category_references, settings=config))(
+                    missing_keys
+                )
             )
         except (
             requests.RequestException,
@@ -181,9 +186,7 @@ def prepare_category_repairs(
                 label, error = lookup.label, lookup.error
         if error:
             report.unresolved_cells += 1
-            identity = (
-                f"{tenant.cloud_id}/{workspace}/{oid}" if oid else f"{key}/{raw_field}"
-            )
+            identity = f"{tenant.cloud_id}/{workspace}/{oid}" if oid else f"{key}/{raw_field}"
             report.failed_objects[identity] = error
             continue
         patches.append(
@@ -207,6 +210,7 @@ def prepare_category_repairs(
 
 
 def apply_category_repairs(current, patches):
+    """Apply only patches whose original ticket/reference values still match."""
     result = current.copy()
     skipped = 0
     if "key" not in result:
@@ -226,13 +230,9 @@ def apply_category_repairs(current, patches):
             # The final merge may retain the observed baseline or accept the
             # downloaded row containing the verified replacement reference.
             # Equivalent unknown placeholders do not represent a new category.
-            text_value(row.get(patch.id_column))
-            not in {patch.observed_id, patch.reference_id}
+            text_value(row.get(patch.id_column)) not in {patch.observed_id, patch.reference_id}
             or not unknown(row.get(patch.label_column))
-            or (
-                cached_time is not None
-                and (source_time is None or cached_time > source_time)
-            )
+            or (cached_time is not None and (source_time is None or cached_time > source_time))
         ):
             skipped += 1
             continue
@@ -242,6 +242,7 @@ def apply_category_repairs(current, patches):
 
 
 def unresolved_cells(frame):
+    """Count unresolved category labels across the shared field registry."""
     return sum(
         int(frame[label].map(unknown).sum())
         for _, _, label in desks.category_fields()

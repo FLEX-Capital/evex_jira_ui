@@ -45,9 +45,7 @@ def test_configuration_change_uses_a_new_client_snapshot(
     monkeypatch.setenv("JIRA_USERNAME", "test-user")
     if hasattr(transform.get_jira, "cache_clear"):
         transform.get_jira.cache_clear()
-    with patch.object(
-        transform, "JIRA", side_effect=[object(), object()]
-    ) as constructor:
+    with patch.object(transform, "JIRA", side_effect=[object(), object()]) as constructor:
         monkeypatch.setenv("JIRA_PASSWORD", "SYNTHETIC_A")
         first = transform.get_jira()
         monkeypatch.setenv("JIRA_PASSWORD", "SYNTHETIC_B")
@@ -129,9 +127,7 @@ def test_environment_launcher_preserves_password_generation(tmp_path: Path) -> N
         ("AZURE_OPENAI_ENDPOINT", "file:///SYNTHETIC_PRIVATE_MARKER"),
     ],
 )
-def test_environment_values_validate_without_eager_network(
-    name: str, value: str
-) -> None:
+def test_environment_values_validate_without_eager_network(name: str, value: str) -> None:
     """Invalid environment metadata fails with variable names, never its value."""
     from settings import SettingsError, load_settings
 
@@ -166,7 +162,4 @@ def test_aliases_whitespace_and_secret_representations() -> None:
     assert "SYNTHETIC_PRIVATE_MARKER" not in repr(config)
     assert "SYNTHETIC_PRIVATE_MARKER" not in repr(config.require_classifier())
     assert load_settings({"UI_PASSWORD": ""}).ui_password is None
-    assert (
-        load_settings({"AZURE_OPENAI_DEPLOYMENT": "fallback"}).azure_deployment
-        == "fallback"
-    )
+    assert load_settings({"AZURE_OPENAI_DEPLOYMENT": "fallback"}).azure_deployment == "fallback"

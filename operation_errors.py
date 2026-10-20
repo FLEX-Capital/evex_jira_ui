@@ -27,9 +27,7 @@ DIAGNOSTIC_CODES = frozenset(
         "unexpected",
     }
 )
-DIAGNOSTIC_STAGES = frozenset(
-    {"fetch", "transform", "links", "source", "assets", "save", "raw"}
-)
+DIAGNOSTIC_STAGES = frozenset({"fetch", "transform", "links", "source", "assets", "save", "raw"})
 
 
 @dataclass(frozen=True)
@@ -122,6 +120,4 @@ def safe_diagnostic(
             )
         elif isinstance(exc, (ValueError, KeyError, TypeError)):
             code = "invalid_payload"
-    return OperationDiagnostic(
-        operation_id, stage, code, project, key, status, retryable
-    )
+    return OperationDiagnostic(operation_id, stage, code, project, key, status, retryable)

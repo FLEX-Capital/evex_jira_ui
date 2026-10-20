@@ -91,9 +91,7 @@ def test_taxonomy_schema_constrains_model_choices() -> None:
     assert schema["additionalProperties"] is False
 
 
-@pytest.mark.parametrize(
-    "missing", [None, pd.NA, float("nan"), pd.NaT, "", [], {}, (), set()]
-)
+@pytest.mark.parametrize("missing", [None, pd.NA, float("nan"), pd.NaT, "", [], {}, (), set()])
 def test_missing_scalars_render_without_ambiguous_truth(missing: object) -> None:
     """Nullable scalars and empty optional containers render without boolean coercion."""
     assert classifier.scalar_text(missing) == ""
@@ -127,9 +125,7 @@ def test_one_bad_record_does_not_abort_valid_batch(tmp_path: Path) -> None:
         {"key": "SDAX-6", "summary": "Second", "comments": "Resolved"},
     ]
     cache = tmp_path / "classifier.parquet"
-    with patch.object(
-        classifier, "classify_one", side_effect=fake_classification
-    ) as call:
+    with patch.object(classifier, "classify_one", side_effect=fake_classification) as call:
         result = classifier.classify_tickets(
             pd.DataFrame(values),
             cache_path=cache,
@@ -161,9 +157,7 @@ def test_sdk_errors_do_not_persist_ticket_or_secret_text(kind: str) -> None:
     elif kind == "refusal":
         response = make_response(refusal="SYNTHETIC_PRIVATE_MARKER")
     else:
-        response = make_response(
-            parsed=_result(resolution_bucket="SYNTHETIC_PRIVATE_MARKER")
-        )
+        response = make_response(parsed=_result(resolution_bucket="SYNTHETIC_PRIVATE_MARKER"))
     result = classifier.classify_one(
         FakeClient(response), "SDAX-1", "Summary: synthetic", model="fake"
     )

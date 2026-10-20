@@ -99,9 +99,7 @@ def test_attach_country_adds_columns_without_mutating():
         }
     )
     before = df.copy()
-    out = attach_country(
-        df, _verified_cache(), allow_legacy=True, settings=load_settings({})
-    )
+    out = attach_country(df, _verified_cache(), allow_legacy=True, settings=load_settings({}))
     pd.testing.assert_frame_equal(df, before)
     assert list(out["Land"]) == ["Deutschland", NO_COUNTRY_ON_ASSET, NO_ASSETS_LINKED]
     assert list(out["land_quelle"]) == ["zentrale", NO_SOURCE, NO_SOURCE]
@@ -109,9 +107,7 @@ def test_attach_country_adds_columns_without_mutating():
 
 def test_attach_country_tolerates_missing_column():
     df = pd.DataFrame({"key": ["A-1"], "zentrale": ["ID_1"], "filiale": [""]})
-    out = attach_country(
-        df, _verified_cache(), allow_legacy=True, settings=load_settings({})
-    )
+    out = attach_country(df, _verified_cache(), allow_legacy=True, settings=load_settings({}))
     assert list(out["Land"]) == ["Deutschland"]
 
 
@@ -123,9 +119,7 @@ def test_resolve_missing_only_fetches_unknown_ids():
         return "Schweiz"
 
     cache = {"1": "Deutschland"}
-    cache, resolved, failed = resolve_missing(
-        ["ID_1", "ID_5", "ID_5", ""], cache, resolver=fake
-    )
+    cache, resolved, failed = resolve_missing(["ID_1", "ID_5", "ID_5", ""], cache, resolver=fake)
     assert calls == ["5"]
     assert cache["5"] == "Schweiz"
     assert (resolved, failed) == (1, 0)
@@ -178,10 +172,7 @@ def test_cache_roundtrip(tmp_path):
     path = tmp_path / "cache.json"
     save_cache({"1": "Deutschland", "2": None}, str(path))
     assert load_cache(str(path)).legacy_unverified == {"1": "Deutschland", "2": None}
-    assert (
-        json.loads(path.read_text(encoding="utf-8"))["legacy_unverified"]["1"]
-        == "Deutschland"
-    )
+    assert json.loads(path.read_text(encoding="utf-8"))["legacy_unverified"]["1"] == "Deutschland"
     assert not load_cache(path).entries
 
 
@@ -225,9 +216,7 @@ def test_country_commits_from_separate_processes_preserve_all_additions(tmp_path
         "import sys; from asset_country import save_cache; "
         "save_cache({sys.argv[2]: sys.argv[2]}, sys.argv[1], baseline={})"
     )
-    processes = [
-        subprocess.Popen([sys.executable, "-c", script, path, str(i)]) for i in range(4)
-    ]
+    processes = [subprocess.Popen([sys.executable, "-c", script, path, str(i)]) for i in range(4)]
     try:
         for process in processes:
             assert process.wait(timeout=30) == 0

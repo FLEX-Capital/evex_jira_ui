@@ -43,8 +43,7 @@ def test_partial_resume_fetches_older_remainder_and_new_tail_with_one_resolver(
         (END, END + timedelta(days=1)),
     ]
     assert all(
-        c.kwargs["category_resolver"] is resolver
-        for c in store.fetch_jira_issues.call_args_list
+        c.kwargs["category_resolver"] is resolver for c in store.fetch_jira_issues.call_args_list
     )
     assert not Path(store._partial_paths("SDAX")[0]).exists()
 
@@ -164,13 +163,9 @@ class CheckpointCoverageTests(unittest.TestCase):
                 datetime(2026, 9, 10, tzinfo=UTC),
                 False,
             )
-            self.assertEqual(
-                fetch.call_args.args[0].isoformat(), "2025-01-01T00:00:00+00:00"
-            )
+            self.assertEqual(fetch.call_args.args[0].isoformat(), "2025-01-01T00:00:00+00:00")
             saved = json.loads((Path(tmp) / "SDEU.json").read_text())
-            self.assertEqual(
-                saved["assets_workspace_id"], "9926cb30-3f07-4fb2-9c83-aa4fc551c721"
-            )
+            self.assertEqual(saved["assets_workspace_id"], "9926cb30-3f07-4fb2-9c83-aa4fc551c721")
             self.assertEqual(saved["start"], "2025-01-01T00:00:00+00:00")
 
     def test_legacy_checkpoint_cannot_import_unverified_sandbox_labels(self):
@@ -232,16 +227,12 @@ class CheckpointCoverageTests(unittest.TestCase):
                         "end": earlier.isoformat(),
                         "issues": [
                             old,
-                            issue(
-                                "SDEU-0", "2026-07-30T00:00:00Z", "2026-08-01T00:00:00Z"
-                            ),
+                            issue("SDEU-0", "2026-07-30T00:00:00Z", "2026-08-01T00:00:00Z"),
                         ],
                     }
                 )
             )
-            with patch.object(
-                backfill, "fetch_jira_issues", return_value=[fresh]
-            ) as fetch:
+            with patch.object(backfill, "fetch_jira_issues", return_value=[fresh]) as fetch:
                 result = backfill.fetch_project("SDEU", start, end, True)
             self.assertEqual(fetch.call_args.args[0], earlier)
             self.assertEqual([i["key"] for i in result], ["SDEU-1"])
@@ -253,9 +244,7 @@ class PartialResumeTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = self.enterContext(tempfile.TemporaryDirectory())
-        self.enterContext(
-            patch.object(backfill, "template", self.tmp + "/{project}.json")
-        )
+        self.enterContext(patch.object(backfill, "template", self.tmp + "/{project}.json"))
         self.start = datetime(2025, 3, 17, tzinfo=UTC)
         self.end = datetime(2026, 9, 16, tzinfo=UTC)
 
@@ -275,7 +264,7 @@ class PartialResumeTests(unittest.TestCase):
     def test_interrupted_fetch_leaves_a_resumable_log(self):
         self._write_partial([self._issue(10), self._issue(11)])
         loaded, oldest, _ = backfill.load_partial("SDAX", self.start)
-        self.assertEqual(sorted((i["key"] for i in loaded)), ["SDAX-10", "SDAX-11"])
+        self.assertEqual(sorted(i["key"] for i in loaded), ["SDAX-10", "SDAX-11"])
         self.assertEqual(oldest, datetime(2026, 8, 10, tzinfo=UTC))
 
     def test_resume_fetches_only_the_older_remainder(self):
@@ -290,9 +279,7 @@ class PartialResumeTests(unittest.TestCase):
         self._write_partial([self._issue(10), self._issue(11)])
         with patch.object(backfill, "fetch_jira_issues", return_value=[self._issue(5)]):
             issues = backfill.fetch_project("SDAX", self.start, self.end, True)
-        self.assertEqual(
-            sorted((i["key"] for i in issues)), ["SDAX-10", "SDAX-11", "SDAX-5"]
-        )
+        self.assertEqual(sorted(i["key"] for i in issues), ["SDAX-10", "SDAX-11", "SDAX-5"])
 
     def test_moved_end_keeps_the_log_and_fetches_only_what_it_lacks(self):
         oldest = datetime(2026, 8, 10, tzinfo=UTC)
@@ -315,7 +302,7 @@ class PartialResumeTests(unittest.TestCase):
                 with patch.object(backfill, "fetch_jira_issues", side_effect=fetch):
                     issues = backfill.fetch_project("SDAX", self.start, end, True)
                 self.assertEqual([f[:2] for f in fetched], windows)
-                self.assertTrue(all((f[2] == 1 for f in fetched)))
+                self.assertTrue(all(f[2] == 1 for f in fetched))
                 self.assertEqual([i["key"] for i in issues], ["SDAX-10"])
 
     def test_completed_fetch_clears_the_partial_log(self):
@@ -332,14 +319,12 @@ class PartialResumeTests(unittest.TestCase):
         with open(log, "a") as handle:
             handle.write('{"key": "SDAX-12", "fields": {"crea')
         loaded, oldest, _ = backfill.load_partial("SDAX", self.start)
-        self.assertEqual(sorted((i["key"] for i in loaded)), ["SDAX-10", "SDAX-11"])
+        self.assertEqual(sorted(i["key"] for i in loaded), ["SDAX-10", "SDAX-11"])
         self.assertEqual(oldest, datetime(2026, 8, 10, tzinfo=UTC))
 
     def test_log_from_a_different_window_is_ignored_not_merged(self):
         self._write_partial([self._issue(10)])
-        loaded, oldest, _ = backfill.load_partial(
-            "SDAX", self.start + timedelta(days=1)
-        )
+        loaded, oldest, _ = backfill.load_partial("SDAX", self.start + timedelta(days=1))
         self.assertEqual(loaded, [])
         self.assertIsNone(oldest)
 
@@ -373,24 +358,18 @@ def test_checkpoint_validation_reports_invalid_rows_once(tmp_path: Path) -> None
     events: list[InvalidIssue] = []
     store = CheckpointStore(tmp_path)
     store.fetch_jira_issues = Mock(return_value=[bad, good])
-    assert store.fetch_project(
-        "SDAX", START, END, False, invalid_row_cb=events.append
-    ) == [good]
+    assert store.fetch_project("SDAX", START, END, False, invalid_row_cb=events.append) == [good]
     assert [(e.key, e.code) for e in events] == [("SDAX-6", "invalid_created")]
     saved = json.loads((tmp_path / "backfill_SDAX.json").read_text())
     saved["issues"].append(bad)
     (tmp_path / "backfill_SDAX.json").write_text(json.dumps(saved))
     store.fetch_jira_issues = Mock(return_value=[])
     events.clear()
-    assert store.fetch_project(
-        "SDAX", START, END, True, invalid_row_cb=events.append
-    ) == [good]
+    assert store.fetch_project("SDAX", START, END, True, invalid_row_cb=events.append) == [good]
     assert len(events) == 1
     store.begin_partial("SDAX", START, END)([bad, good])
     events.clear()
-    assert store.fetch_project(
-        "SDAX", START, END, True, invalid_row_cb=events.append
-    ) == [good]
+    assert store.fetch_project("SDAX", START, END, True, invalid_row_cb=events.append) == [good]
     assert len(events) == 1
 
 
@@ -406,7 +385,5 @@ def test_invalid_incoming_snapshot_cannot_remove_valid_checkpoint(
     bad = {**good, "fields": {"created": None, "updated": "2026-09-02T00:00:00Z"}}
     store.fetch_jira_issues = Mock(return_value=[bad])
     events: list[InvalidIssue] = []
-    assert store.fetch_project(
-        "SDAX", START, END, True, invalid_row_cb=events.append
-    ) == [good]
+    assert store.fetch_project("SDAX", START, END, True, invalid_row_cb=events.append) == [good]
     assert len(events) == 1

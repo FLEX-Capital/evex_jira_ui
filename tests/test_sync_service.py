@@ -33,9 +33,7 @@ def request(**kwargs):
     return desk_sync.make_sync_request(START, END, **kwargs)
 
 
-def test_all_projects_use_current_transformation_and_commit_with_one_backup(
-    storage, monkeypatch
-):
+def test_all_projects_use_current_transformation_and_commit_with_one_backup(storage, monkeypatch):
     data_loading.save_data(pd.DataFrame([{"key": "OLD-1", "summary": "Keep"}]))
     original = storage.read_bytes()
     monkeypatch.setattr(
@@ -49,15 +47,10 @@ def test_all_projects_use_current_transformation_and_commit_with_one_backup(
     assert report.complete and report.rows == 4
     backups = list(storage.parent.glob(f"{storage.name}.bak-*"))
     assert len(backups) == 1 and backups[0].read_bytes() == original
-    assert (
-        json.loads((storage.parent / "import_status.json").read_text())["state"]
-        == "completed"
-    )
+    assert json.loads((storage.parent / "import_status.json").read_text())["state"] == "completed"
 
 
-def test_zero_result_import_repairs_older_unknowns_outside_selected_window(
-    storage, monkeypatch
-):
+def test_zero_result_import_repairs_older_unknowns_outside_selected_window(storage, monkeypatch):
     from data_transformation import load_project_issues
 
     old = load_project_issues("SDAX", [raw()])
@@ -71,9 +64,7 @@ def test_zero_result_import_repairs_older_unknowns_outside_selected_window(
 
 
 def test_all_failed_fetches_do_not_touch_ticket_data(storage, monkeypatch):
-    data_loading.save_data(
-        pd.DataFrame([{"key": "SDAX-1", "Hauptkategorie": "Unbekannt"}])
-    )
+    data_loading.save_data(pd.DataFrame([{"key": "SDAX-1", "Hauptkategorie": "Unbekannt"}]))
     original = storage.read_bytes()
 
     def fail(*a, **k):
@@ -86,9 +77,7 @@ def test_all_failed_fetches_do_not_touch_ticket_data(storage, monkeypatch):
     assert not list(storage.parent.glob("*.bak-*"))
 
 
-def test_partial_desk_failure_preserves_cached_rows_and_previous_raw(
-    storage, monkeypatch
-):
+def test_partial_desk_failure_preserves_cached_rows_and_previous_raw(storage, monkeypatch):
     data_loading.save_data(pd.DataFrame([{"key": "SDAX-1", "summary": "Retain"}]))
     raw_path = storage.parent / "jira_issues.json"
     raw_path.write_text('["previous"]')
@@ -183,9 +172,7 @@ def test_successful_category_repair_clears_its_warning_but_keeps_other_assets_fa
     assert report.asset_failures == {"SDAX": 1} and not report.complete
 
 
-def test_raw_publication_failure_is_distinct_from_failed_cache_commit(
-    storage, monkeypatch
-):
+def test_raw_publication_failure_is_distinct_from_failed_cache_commit(storage, monkeypatch):
     monkeypatch.setattr(sync_checkpoints, "fetch_jira_issues", lambda *a, **k: [raw()])
 
     def fail(*a, **k):
@@ -264,9 +251,7 @@ def test_source_repair_cannot_replace_a_concurrent_source_update(storage, monkey
     assert report.source_updates == 0
 
 
-@pytest.mark.parametrize(
-    "old_id,old_label", [("main-1", None), ("old-id", "Unbekannt")]
-)
+@pytest.mark.parametrize("old_id,old_label", [("main-1", None), ("old-id", "Unbekannt")])
 def test_resume_applies_recovered_category_to_accepted_checkpoint_row(
     storage, monkeypatch, old_id, old_label
 ):
@@ -292,9 +277,7 @@ def test_resume_applies_recovered_category_to_accepted_checkpoint_row(
     assert report.asset_failures == {"SDAX": 0}
 
 
-def test_raw_snapshot_retains_its_own_request_metadata_after_later_cli_run(
-    storage, monkeypatch
-):
+def test_raw_snapshot_retains_its_own_request_metadata_after_later_cli_run(storage, monkeypatch):
     import hashlib
 
     monkeypatch.setattr(sync_checkpoints, "fetch_jira_issues", lambda *a, **k: [])
@@ -305,10 +288,7 @@ def test_raw_snapshot_retains_its_own_request_metadata_after_later_cli_run(
     metadata = json.loads(metadata_path.read_text())
     assert json.loads(raw_path.read_text()) == []
     assert metadata["request"] == {**first.to_dict(), "projects": ["SDAX"]}
-    assert (
-        metadata["run_id"]
-        == json.loads(desk_sync.status_path(storage).read_text())["run_id"]
-    )
+    assert metadata["run_id"] == json.loads(desk_sync.status_path(storage).read_text())["run_id"]
     assert metadata["sha256"] == hashlib.sha256(raw_path.read_bytes()).hexdigest()
     assert datetime.fromisoformat(metadata["published_at"]).tzinfo is not None
     original_metadata = metadata_path.read_bytes()
@@ -323,9 +303,7 @@ def test_raw_metadata_failure_is_reported_after_cache_commit(storage, monkeypatc
     monkeypatch.setattr(sync_checkpoints, "fetch_jira_issues", lambda *a, **k: [raw()])
     assert desk_sync.run_sync(request(projects=["SDAX"], publish_raw=True)).complete
     original = json.loads((storage.parent / "jira_issues.meta.json").read_text())
-    monkeypatch.setattr(
-        sync_checkpoints, "fetch_jira_issues", lambda *a, **k: [raw(number=2)]
-    )
+    monkeypatch.setattr(sync_checkpoints, "fetch_jira_issues", lambda *a, **k: [raw(number=2)])
     write = desk_sync.write_json_atomic
 
     def fail_metadata(path, value):
@@ -339,9 +317,7 @@ def test_raw_metadata_failure_is_reported_after_cache_commit(storage, monkeypatc
     assert not report.save_error and not report.complete
     assert (
         original["sha256"]
-        != hashlib.sha256(
-            (storage.parent / "jira_issues.json").read_bytes()
-        ).hexdigest()
+        != hashlib.sha256((storage.parent / "jira_issues.json").read_bytes()).hexdigest()
     )
 
 
@@ -359,9 +335,7 @@ def test_invalid_rows_preserve_cached_counterpart_and_valid_desk_rows(
     monkeypatch.setattr(
         sync_checkpoints,
         "fetch_jira_issues",
-        lambda *a, project, **k: (
-            [bad, raw("SDAX", 2)] if project == "SDAX" else [raw(project)]
-        ),
+        lambda *a, project, **k: [bad, raw("SDAX", 2)] if project == "SDAX" else [raw(project)],
     )
     report = desk_sync.run_sync(request(projects=["SDAX", "SDEU"]))
     result = pd.read_pickle(storage).set_index("key")

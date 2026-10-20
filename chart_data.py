@@ -56,9 +56,7 @@ def prepare_chart_data(
     work = pd.DataFrame(
         {
             "x": labels(frame[x]) if x in frame else pd.Series(dtype="string"),
-            "group": (
-                labels(frame[group]) if group in frame else pd.Series(dtype="string")
-            ),
+            "group": (labels(frame[group]) if group in frame else pd.Series(dtype="string")),
             "key": frame[key_col] if key_col in frame else pd.Series(dtype="string"),
         }
     )

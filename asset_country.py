@@ -130,11 +130,7 @@ def parse_asset_reference(
     if not isinstance(value, (str, int)) or isinstance(value, bool):
         return None
     object_id = normalise_object_id(value)
-    return (
-        AssetIdentity(tenant.cloud_id, tenant.workspace_id, object_id)
-        if object_id
-        else None
-    )
+    return AssetIdentity(tenant.cloud_id, tenant.workspace_id, object_id) if object_id else None
 
 
 def issue_asset_references(
@@ -166,13 +162,9 @@ def issue_asset_references(
                 "source": source,
                 "cloud_id": parsed.cloud_id if parsed and modern else None,
                 "workspace_id": parsed.workspace_id if parsed and modern else None,
-                "object_id": (
-                    parsed.object_id if parsed else normalise_object_id(raw_id)
-                ),
+                "object_id": (parsed.object_id if parsed else normalise_object_id(raw_id)),
                 "provenance": (
-                    "modern"
-                    if parsed and modern
-                    else "legacy_unverified" if parsed else "rejected"
+                    "modern" if parsed and modern else "legacy_unverified" if parsed else "rejected"
                 ),
             }
         )
@@ -191,9 +183,7 @@ def country_references(
                 record["cloud_id"], record["workspace_id"], record["object_id"]
             )
         elif record["provenance"] == "legacy_unverified":
-            identity = parse_asset_reference(
-                record["object_id"], tenant=tenant, legacy=True
-            )
+            identity = parse_asset_reference(record["object_id"], tenant=tenant, legacy=True)
         result.append((record["source"], identity))
     return tuple(result)
 
@@ -276,10 +266,7 @@ def resolve_country(
             raise CountryResolutionError("invalid_payload")
         for name in COUNTRY_ATTRIBUTES:
             for attribute in attributes:
-                if (
-                    attribute["objectTypeAttribute"]["name"].casefold()
-                    != name.casefold()
-                ):
+                if attribute["objectTypeAttribute"]["name"].casefold() != name.casefold():
                     continue
                 for value in attribute["objectAttributeValues"]:
                     if not isinstance(value, Mapping):
@@ -315,11 +302,7 @@ def select_country(
             return CountrySelection(lookup.country, source, tuple(failures))
         if lookup.outcome != "no_country":
             failures.append(lookup)
-    country = (
-        NOT_RESOLVED
-        if failures
-        else NO_COUNTRY_ON_ASSET if references else NO_ASSETS_LINKED
-    )
+    country = NOT_RESOLVED if failures else NO_COUNTRY_ON_ASSET if references else NO_ASSETS_LINKED
     return CountrySelection(country, NO_SOURCE, tuple(failures))
 
 
@@ -337,9 +320,7 @@ def resolve_asset_country_strict(
         workspace_id or config.tenant.workspace_id,
         str(object_id),
     )
-    lookup = resolve_country(
-        identity, fetch=partial(fetch_country_asset, settings=config)
-    )
+    lookup = resolve_country(identity, fetch=partial(fetch_country_asset, settings=config))
     if lookup.outcome == "failed":
         raise CountryResolutionError(lookup.error_code or "unexpected")
     return lookup.country
@@ -349,9 +330,7 @@ def _as_country_cache(cache: CountryCache | Mapping[str, str | None]) -> Country
     return cache if isinstance(cache, CountryCache) else CountryCache({}, dict(cache))
 
 
-def load_cache(
-    path: str | Path | None = None, *, settings: Settings | None = None
-) -> CountryCache:
+def load_cache(path: str | Path | None = None, *, settings: Settings | None = None) -> CountryCache:
     """Load typed country state; bare legacy values remain unverified metadata."""
     config = settings or load_settings()
     return load_country_cache(config.paths.countries if path is None else Path(path))
@@ -367,9 +346,7 @@ def save_cache(
     """Merge verified identities and explicit legacy metadata outside ticket locks."""
     config = settings or load_settings()
     prepared = _as_country_cache(cache)
-    original = (
-        _as_country_cache(baseline).legacy_unverified if baseline is not None else None
-    )
+    original = _as_country_cache(baseline).legacy_unverified if baseline is not None else None
     return merge_country_entries(
         config.paths.countries if path is None else Path(path),
         list(prepared.entries.values()),
@@ -426,9 +403,7 @@ def classify_country(ansprechpartner, filiale, zentrale, cache):
     """
     linked = False
     unresolved = False
-    for source, raw in zip(
-        ESCALATION_COLUMNS, (ansprechpartner, filiale, zentrale), strict=True
-    ):
+    for source, raw in zip(ESCALATION_COLUMNS, (ansprechpartner, filiale, zentrale), strict=True):
         object_id = normalise_object_id(raw)
         if object_id is None:
             continue
@@ -540,12 +515,7 @@ def attach_country(
     for _, row in out.iterrows():
         references, unverified = _row_references(row, tenant, allow_legacy=allow_legacy)
         stored = row.get("Land")
-        if (
-            unverified
-            and not allow_legacy
-            and isinstance(stored, str)
-            and stored.strip()
-        ):
+        if unverified and not allow_legacy and isinstance(stored, str) and stored.strip():
             pairs.append(
                 (
                     stored,
@@ -560,8 +530,7 @@ def attach_country(
         outcomes = {
             identity: CountryLookup(identity, entry.outcome, entry.country, None)
             for _, identity in references
-            if identity is not None
-            and (entry := cache.entries.get(identity)) is not None
+            if identity is not None and (entry := cache.entries.get(identity)) is not None
         }
         selected = select_country(references, outcomes)
         pairs.append((selected.country, selected.source))
@@ -576,22 +545,14 @@ def _reference_status(
     *,
     now: datetime,
 ) -> dict[str, int]:
-    identities = {
-        identity
-        for group in references
-        for _, identity in group
-        if identity is not None
-    }
+    identities = {identity for group in references for _, identity in group if identity is not None}
     return {
         "stale": sum(
-            identity in cache.entries
-            and not is_country_fresh(cache.entries[identity], now=now)
+            identity in cache.entries and not is_country_fresh(cache.entries[identity], now=now)
             for identity in identities
         ),
         "unverified": sum(identity not in cache.entries for identity in identities),
-        "unresolved": sum(
-            identity is None for group in references for _, identity in group
-        ),
+        "unresolved": sum(identity is None for group in references for _, identity in group),
     }
 
 
@@ -605,12 +566,9 @@ def country_cache_status(
     """Count selected stale/unverified asset identities and rejected references offline."""
     config = settings or load_settings()
     references = [
-        _row_references(row, config.tenant, allow_legacy=True)[0]
-        for _, row in df.iterrows()
+        _row_references(row, config.tenant, allow_legacy=True)[0] for _, row in df.iterrows()
     ]
-    return _reference_status(
-        references, _as_country_cache(cache), now=now or datetime.now(UTC)
-    )
+    return _reference_status(references, _as_country_cache(cache), now=now or datetime.now(UTC))
 
 
 def refresh_countries(
@@ -633,28 +591,18 @@ def refresh_countries(
     config = settings or load_settings()
     marker = df.attrs.get(TENANT_ATTR)
     if marker is None and config.tenant != DEFAULT_TENANT:
-        raise SettingsError(
-            "legacy_tenant_unknown", ("JIRA_CLOUD_ID", "JIRA_WORKSPACE_ID")
-        )
+        raise SettingsError("legacy_tenant_unknown", ("JIRA_CLOUD_ID", "JIRA_WORKSPACE_ID"))
     if marker is not None and marker != config.tenant.as_dict():
         raise SettingsError("tenant_mismatch", ("JIRA_CLOUD_ID", "JIRA_WORKSPACE_ID"))
     clock = now or (lambda: datetime.now(UTC))
     requested_at = clock()
     current = (
-        load_cache(cache_path, settings=config)
-        if cache is None
-        else _as_country_cache(cache)
+        load_cache(cache_path, settings=config) if cache is None else _as_country_cache(cache)
     ).copy()
     references = [
-        _row_references(row, config.tenant, allow_legacy=True)[0]
-        for _, row in df.iterrows()
+        _row_references(row, config.tenant, allow_legacy=True)[0] for _, row in df.iterrows()
     ]
-    identities = {
-        identity
-        for group in references
-        for _, identity in group
-        if identity is not None
-    }
+    identities = {identity for group in references for _, identity in group if identity is not None}
     pending = sorted(
         (
             identity
@@ -679,17 +627,13 @@ def refresh_countries(
 
     def resolve_lookup(identity: AssetIdentity) -> CountryLookup:
         if resolver is None:
-            return resolve_country(
-                identity, fetch=partial(fetch_country_asset, settings=config)
-            )
+            return resolve_country(identity, fetch=partial(fetch_country_asset, settings=config))
         try:
             value = resolver(identity.object_id)
             if value is not None and not isinstance(value, str):
                 return CountryLookup(identity, "failed", None, "invalid_payload")
             value = value.strip() or None if value is not None else None
-            return CountryLookup(
-                identity, "found" if value else "no_country", value, None
-            )
+            return CountryLookup(identity, "found" if value else "no_country", value, None)
         except Exception as exc:
             return CountryLookup(identity, "failed", None, _country_error_code(exc))
 
@@ -713,9 +657,7 @@ def refresh_countries(
                 outcome.country,
                 completed_at,
             )
-            current.entries[identity] = choose_country_entry(
-                current.entries.get(identity), entry
-            )
+            current.entries[identity] = choose_country_entry(current.entries.get(identity), entry)
             resolved += 1
     stats = {
         "dropped": dropped,

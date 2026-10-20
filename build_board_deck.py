@@ -165,9 +165,7 @@ def heading(slide, title, sub=None):
 
 
 def source(slide, note):
-    text(
-        slide, note, PAD, H - Inches(0.6), CONTENT_W, Inches(0.3), size=9.5, color=MUTED
-    )
+    text(slide, note, PAD, H - Inches(0.6), CONTENT_W, Inches(0.3), size=9.5, color=MUTED)
 
 
 def bar_rows(slide, rows, top, *, label_w, bar_w, max_value, row_h, gap):
@@ -642,8 +640,7 @@ def slide_validation(slide):
     )
     text(
         slide,
-        "the base rate of structural escalation — while unclear sits at a "
-        "fortieth of it.",
+        "the base rate of structural escalation — while unclear sits at a fortieth of it.",
         panel_left + Inches(0.2),
         top + Inches(1.05),
         Inches(1.95),
@@ -743,9 +740,7 @@ def slide_matrix(slide):
         size=12.5,
         color=INK_2,
     )
-    source(
-        slide, "Ticket counts · rows sum to the resolution split on the previous slide"
-    )
+    source(slide, "Ticket counts · rows sum to the resolution split on the previous slide")
 
 
 def slide_categories(slide):
@@ -834,7 +829,8 @@ def slide_intents(slide):
         slide,
         "The requests that keep coming back",
         "The classification named each ticket’s intent in its own words rather than picking "
-        "from a list, so these groupings were found in the data. 38 intents recur 60 times or more.",
+        "from a list, so these groupings were found in the data. "
+        "38 intents recur 60 times or more.",
     )
 
     intents = [

@@ -14,14 +14,8 @@ from settings import DEFAULT_TENANT, TENANT_ATTR, Settings, SettingsError, load_
 DATA_PATH = "data/jira_data.pkl"
 
 
-def _ticket_path(
-    path: str | Path | None = None, *, settings: Settings | None = None
-) -> Path:
-    return (
-        Path(path).resolve()
-        if path is not None
-        else (settings or load_settings()).paths.tickets
-    )
+def _ticket_path(path: str | Path | None = None, *, settings: Settings | None = None) -> Path:
+    return Path(path).resolve() if path is not None else (settings or load_settings()).paths.tickets
 
 
 class CacheChangedError(RuntimeError):
@@ -34,6 +28,7 @@ class ImportBusyError(RuntimeError):
 
 @contextmanager
 def import_operation_lock(data_path=None):
+    """Serialize imports for the selected ticket cache using a separate operation lock."""
     path = _ticket_path(data_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with Path(f"{path}.import.lock").open("a+b") as handle:
@@ -61,6 +56,7 @@ def cache_lock(path=None, *, blocking=True):
 
 
 def cache_revision(path=None) -> Revision | None:
+    """Return the ticket artifact revision or None when it is absent."""
     try:
         stat = _ticket_path(path).stat()
     except FileNotFoundError:
@@ -76,9 +72,7 @@ def load_data_snapshot(path=None, *, settings=None):
         return load_data(path=target, settings=settings), cache_revision(target)
 
 
-def save_data_if_unchanged(
-    df, revision, *, backup_prefix=None, path=None, settings=None
-):
+def save_data_if_unchanged(df, revision, *, backup_prefix=None, path=None, settings=None):
     """Commit a snapshot only if no writer has replaced its input meanwhile."""
     settings = settings or load_settings()
     target = _ticket_path(path, settings=settings)
@@ -89,9 +83,7 @@ def save_data_if_unchanged(
             )
         backup = None
         if backup_prefix and target.exists():
-            backup = (
-                f"{target}.bak-{backup_prefix}-{datetime.now(UTC):%Y%m%d-%H%M%S-%f}"
-            )
+            backup = f"{target}.bak-{backup_prefix}-{datetime.now(UTC):%Y%m%d-%H%M%S-%f}"
             shutil.copy2(target, backup)
         save_data(df, path=target, settings=settings)
         return backup
@@ -119,6 +111,7 @@ def drop_obsolete_columns(df):
 
 
 def save_data(df, *, path=None, settings=None):
+    """Normalize and atomically publish a ticket frame under its owning lock."""
     settings = settings or load_settings()
     target = _ticket_path(path, settings=settings)
     with cache_lock(target):
@@ -137,6 +130,7 @@ def _save_data_unlocked(df, *, path=None, settings=None):
 
 
 def load_data(*, path=None, settings=None):
+    """Read and validate a trusted local ticket cache against captured tenant settings."""
     config = settings or load_settings()
     path = _ticket_path(path, settings=config)
     if path.exists():
@@ -153,13 +147,9 @@ def load_data(*, path=None, settings=None):
         identity = frame.attrs.get(TENANT_ATTR)
         if identity is None:
             if config.tenant != DEFAULT_TENANT:
-                raise SettingsError(
-                    "legacy_tenant_unknown", ("JIRA_CLOUD_ID", "JIRA_WORKSPACE_ID")
-                )
+                raise SettingsError("legacy_tenant_unknown", ("JIRA_CLOUD_ID", "JIRA_WORKSPACE_ID"))
         elif identity != config.tenant.as_dict():
-            raise SettingsError(
-                "tenant_mismatch", ("JIRA_CLOUD_ID", "JIRA_WORKSPACE_ID")
-            )
+            raise SettingsError("tenant_mismatch", ("JIRA_CLOUD_ID", "JIRA_WORKSPACE_ID"))
         frame.attrs[TENANT_ATTR] = config.tenant.as_dict()
         return frame
     return None

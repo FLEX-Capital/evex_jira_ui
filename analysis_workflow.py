@@ -48,11 +48,7 @@ class AnalysisSpec:
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[A-Z][A-Z0-9_]*", self.project):
             raise ValueError("invalid_analysis_project")
-        if (
-            type(self.start) is not date
-            or type(self.end) is not date
-            or self.start > self.end
-        ):
+        if type(self.start) is not date or type(self.end) is not date or self.start > self.end:
             raise ValueError("invalid_analysis_window")
         if not self.classification_policy_version.strip():
             raise ValueError("missing_classification_policy_version")
@@ -60,13 +56,9 @@ class AnalysisSpec:
 
 def select_cohort(frame: pd.DataFrame, spec: AnalysisSpec) -> pd.DataFrame:
     """Copy exact project/window rows, recording mutually exclusive exclusion counts."""
-    keys = frame.get("key", pd.Series(index=frame.index, dtype="string")).astype(
-        "string"
-    )
+    keys = frame.get("key", pd.Series(index=frame.index, dtype="string")).astype("string")
     project = keys.str.fullmatch(re.escape(spec.project) + r"-\d+", na=False)
-    created = pd.to_datetime(
-        frame.get("created"), format="mixed", errors="coerce", utc=True
-    )
+    created = pd.to_datetime(frame.get("created"), format="mixed", errors="coerce", utc=True)
     if created is None:
         created = pd.Series(pd.NaT, index=frame.index, dtype="datetime64[ns, UTC]")
     valid = created.notna()
@@ -108,9 +100,7 @@ def _canonical(value: Any) -> Any:
 def cohort_digest(frame: pd.DataFrame) -> str:
     """Hash selected input/category/link/metric fields in stable key order, excluding attrs."""
     records = (
-        frame.reindex(columns=_INPUT_FIELDS)
-        .sort_values("key", kind="stable")
-        .to_dict("records")
+        frame.reindex(columns=_INPUT_FIELDS).sort_values("key", kind="stable").to_dict("records")
     )
     payload = json.dumps(
         _canonical(records), sort_keys=True, separators=(",", ":"), ensure_ascii=False

@@ -10,9 +10,7 @@ from cache_schema import SCHEMA_ATTR
 
 
 def _legacy(path: Path) -> bytes:
-    frame = pd.DataFrame(
-        [{"key": "SDAX-1", "summary": "synthetic", "Land": "Österreich"}]
-    )
+    frame = pd.DataFrame([{"key": "SDAX-1", "summary": "synthetic", "Land": "Österreich"}])
     frame.attrs["history"] = "keep"
     frame.to_pickle(path)
     return path.read_bytes()
@@ -50,9 +48,7 @@ def test_apply_backs_up_exact_original_and_publishes_v2(tmp_path: Path) -> None:
     assert path.read_bytes() == before and set(tmp_path.iterdir()) == files
 
 
-@pytest.mark.parametrize(
-    "failure", ["stale", "backup", "fsync", "replace", "active_import"]
-)
+@pytest.mark.parametrize("failure", ["stale", "backup", "fsync", "replace", "active_import"])
 def test_stale_or_failed_migration_preserves_original(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
@@ -114,18 +110,10 @@ def test_apply_requires_explicit_valid_revision(
     path = tmp_path / "jira_data.pkl"
     before = _legacy(path)
     assert main(["migrate", "--path", str(path), "--apply"]) == 2
-    assert (
-        main(["migrate", "--path", str(path), "--apply", "--expected-revision", "bad"])
-        == 2
-    )
+    assert main(["migrate", "--path", str(path), "--apply", "--expected-revision", "bad"]) == 2
     assert path.read_bytes() == before
     expected = ":".join(map(str, plan_migration(path).revision))
-    assert (
-        main(
-            ["migrate", "--path", str(path), "--apply", "--expected-revision", expected]
-        )
-        == 0
-    )
+    assert main(["migrate", "--path", str(path), "--apply", "--expected-revision", expected]) == 0
     assert "SYNTHETIC_PRIVATE_MARKER" not in capsys.readouterr().out
 
 

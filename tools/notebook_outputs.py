@@ -151,18 +151,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Check tracked notebooks by default; strip only on an explicit request."""
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument(
-        "--check", action="store_true", help="check without writing (default)"
-    )
-    mode.add_argument(
-        "--strip", action="store_true", help="explicitly clear execution state"
-    )
-    parser.add_argument(
-        "--repo-root", type=Path, default=Path(__file__).resolve().parents[1]
-    )
-    parser.add_argument(
-        "--path", type=Path, action="append", help="select a path; repeatable"
-    )
+    mode.add_argument("--check", action="store_true", help="check without writing (default)")
+    mode.add_argument("--strip", action="store_true", help="explicitly clear execution state")
+    parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--path", type=Path, action="append", help="select a path; repeatable")
     args = parser.parse_args(argv)
     try:
         paths = (
@@ -186,9 +178,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     _emit({"code": "saved_execution_state", **asdict(violation)})
         except NotebookError as error:
             errors += 1
-            _emit(
-                {"path": error.path, "code": error.code, "cell_index": error.cell_index}
-            )
+            _emit({"path": error.path, "code": error.code, "cell_index": error.cell_index})
     _emit({"checked": len(paths), "dirty": dirty, "errors": errors})
     return 2 if errors else int(bool(dirty))
 

@@ -25,9 +25,7 @@ NOTEBOOK = Path(__file__).resolve().parents[1] / "amparex_ai_assist_analysis.ipy
 
 def _cell(identifier: str) -> str:
     notebook = json.loads(NOTEBOOK.read_text())
-    return "".join(
-        next(cell for cell in notebook["cells"] if cell["id"] == identifier)["source"]
-    )
+    return "".join(next(cell for cell in notebook["cells"] if cell["id"] == identifier)["source"])
 
 
 @pytest.mark.parametrize(
@@ -37,9 +35,7 @@ def _cell(identifier: str) -> str:
         (date(2026, 10, 25), "2026-10-25T22:59:59.999999Z"),
     ],
 )
-def test_project_and_inclusive_window_apply_after_cache_load(
-    day: date, late: str
-) -> None:
+def test_project_and_inclusive_window_apply_after_cache_load(day: date, late: str) -> None:
     """Include late tickets on both DST days; excluded rows leave identity stable."""
     from analysis_workflow import AnalysisSpec, cohort_digest, select_cohort
 
@@ -89,14 +85,10 @@ def test_modern_unresolved_categories_do_not_borrow_static_labels() -> None:
     legacy = issue(key="SDAX-3", main_id="41")
     with patch.dict(transform.object_id_to_name, {"41": "Legacy category"}):
         frame = transform.load_issues_Amparex([modern, foreign, legacy])
-    selected = select_cohort(
-        frame, AnalysisSpec("SDAX", date(2026, 9, 1), date(2026, 9, 10), "1")
-    )
+    selected = select_cohort(frame, AnalysisSpec("SDAX", date(2026, 9, 1), date(2026, 9, 10), "1"))
     before = selected.copy(deep=True)
     code = _cell("69e06888")
-    with patch(
-        "builtins.open", return_value=io.StringIO('{"41":"Forbidden static label"}')
-    ):
+    with patch("builtins.open", return_value=io.StringIO('{"41":"Forbidden static label"}')):
         exec(compile(code, str(NOTEBOOK), "exec"), {"df": selected})
     assert selected.Hauptkategorie.tolist() == [
         "Unbekannt",
@@ -146,9 +138,7 @@ def test_manifest_identifies_exact_cohort_and_configuration() -> None:
     assert changed_source["cohort_digest"] == first["cohort_digest"]
     assert changed_source["extraction_digest"] != first["extraction_digest"]
     assert cohort_digest(selected.assign(summary="changed")) != cohort_digest(selected)
-    assert cohort_digest(selected.assign(Hauptkategorie="changed")) != cohort_digest(
-        selected
-    )
+    assert cohort_digest(selected.assign(Hauptkategorie="changed")) != cohort_digest(selected)
 
 
 @pytest.mark.parametrize("run", [False, True])
@@ -157,16 +147,12 @@ def test_classification_opt_in_and_one_to_one_join(tmp_path: Path, run: bool) ->
     path = tmp_path / "classifications.parquet"
     config = classifier.classifier_configuration(load_settings({}), model="fake")
     frame = make_frame(["SDAX-1"])
-    merge_classifications(
-        path, pd.DataFrame([fake_classification(None, "SDAX-99", "old")])
-    )
+    merge_classifications(path, pd.DataFrame([fake_classification(None, "SDAX-99", "old")]))
 
     def fake(selected: pd.DataFrame, **kwargs: Any) -> pd.DataFrame:
         assert selected.key.tolist() == ["SDAX-1"] and kwargs["configuration"] == config
         with patch.object(classifier, "classify_one", side_effect=fake_classification):
-            return classifier.classify_tickets(
-                selected, client=object(), progress=False, **kwargs
-            )
+            return classifier.classify_tickets(selected, client=object(), progress=False, **kwargs)
 
     runner = Mock(side_effect=fake)
     values: dict[str, Any] = {

@@ -18,10 +18,7 @@ PROVENANCE = ROOT / "analysis/historical/board-provenance.json"
 def source_digest(path: Path) -> str:
     """Hash notebook cell identities and source independently of saved execution state."""
     notebook = json.loads(path.read_text())
-    cells = [
-        {k: cell.get(k) for k in ("cell_type", "id", "source")}
-        for cell in notebook["cells"]
-    ]
+    cells = [{k: cell.get(k) for k in ("cell_type", "id", "source")} for cell in notebook["cells"]]
     return hashlib.sha256(json.dumps(cells, sort_keys=True).encode()).hexdigest()
 
 
@@ -61,10 +58,7 @@ def test_historical_provenance_marks_unknown_fields() -> None:
     ):
         assert manifest[name] is None
     for source in manifest["sources"]:
-        assert (
-            hashlib.sha256((ROOT / source["path"]).read_bytes()).hexdigest()
-            == source["sha256"]
-        )
+        assert hashlib.sha256((ROOT / source["path"]).read_bytes()).hexdigest() == source["sha256"]
     assert manifest["literal_snapshot"] is True
 
 
