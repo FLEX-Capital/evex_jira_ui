@@ -220,32 +220,6 @@ def enrich_jira_time_metrics(
     return out
 
 
-"""
-def business_seconds_between(start: pd.Timestamp,
-                             end: pd.Timestamp,
-                             holiday_set: set) -> float:
-    if pd.isna(start) or pd.isna(end):
-        return float("nan")
-    if end <= start:
-        return 0.0
-
-    # iterate day by day, sum overlaps with business window
-    total = 0.0
-    for day in pd.date_range(start.normalize(), end.normalize(), freq="D", tz=start.tz):
-        d = day.date()
-        # weekday: Mon=0..Sun=6
-        if day.weekday() >= 5 or d in holiday_set:
-            continue
-
-        day_start = pd.Timestamp.combine(d, BUS_START).tz_localize(start.tz)
-        day_end   = pd.Timestamp.combine(d, BUS_END).tz_localize(start.tz)
-
-        overlap_start = max(start, day_start)
-        overlap_end   = min(end, day_end)
-        if overlap_end > overlap_start:
-            total += (overlap_end - overlap_start).total_seconds()
-    return total"""
-
 # read object_id_to_name from json file
 with load_settings().paths.category_map.open() as f:
     object_id_to_name = json.load(f)

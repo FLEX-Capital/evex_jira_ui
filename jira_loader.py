@@ -74,24 +74,6 @@ def fetch_asset_object_uncached(
     return jira_request(url, settings=settings)
 
 
-def get_workspace_id(workspace_name, *, settings=None):
-    """Fetch the workspace ID for a given workspace name."""
-    config = settings or load_settings()
-    url = f"https://api.atlassian.com/ex/jira/{config.tenant.cloud_id}/jsm/assets/workspace/list"
-    workspaces = jira_request(url, settings=config).get("values", [])
-    for ws in workspaces:
-        if ws.get("name", "").lower() == workspace_name.lower():
-            return ws.get("id")
-    raise ValueError(f"Workspace '{workspace_name}' not found")
-
-
-def get_workspaces(*, settings=None):
-    # https://<Assets Site Name>.atlassian.net/rest/servicedeskapi/assets/workspace
-    config = settings or load_settings()
-    url = f"{config.require_jira().url}/rest/servicedeskapi/assets/workspace"
-    return jira_request(url, settings=config)
-
-
 def fetch_object_schema_list(
     start_at=0,
     max_results=50,
@@ -426,32 +408,3 @@ def fetch_jira_issues(
         with path_lock(target):
             write_json_atomic(target, all_issues)
     return all_issues
-
-
-def parse_clone_links(issue):
-    """
-    Extract clone relationships from a JIRA issue.
-    Returns a dictionary with lists: 'clones' and 'cloned_by'.
-    """
-
-    result = {
-        "clones": [],  # issues this issue clones
-        "cloned_by": [],  # issues that clone this one
-    }
-
-    links = issue.get("fields", {}).get("issuelinks", [])
-    if not links:
-        return result
-
-    for link in links:
-        # A link carries an outwardIssue, an inwardIssue, or neither - probe
-        # with .get() instead of swallowing KeyError with a bare except/pass.
-        outward = link.get("outwardIssue") or {}
-        if "key" in outward:
-            result["clones"].append(outward["key"])
-
-        inward = link.get("inwardIssue") or {}
-        if "key" in inward:
-            result["cloned_by"].append(inward["key"])
-
-    return result

@@ -288,17 +288,3 @@ def apply_font(fig: go.Figure, base: int = 20) -> go.Figure:
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     return fig
-
-
-def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
-    """Filter status and assignee through the legacy sidebar adapter."""
-    with st.sidebar:
-        status: list[str] = st.multiselect("Status", df.status.unique())
-        assignee: list[str] = st.multiselect("Assignee", df.assignee.unique())
-
-    if status:
-        df = df[df.status.isin(status)]
-    if assignee:
-        df = df[df.assignee.isin(assignee)]
-
-    return df
