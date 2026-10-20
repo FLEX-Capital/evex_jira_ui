@@ -14,7 +14,7 @@ from jira_loader import (
     enrich_issue_assets,
     fetch_jira_issues,
 )
-from service_desks import as_utc, effective_start, filter_issue_window
+from service_desks import InvalidIssue, as_utc, effective_start, filter_issue_window
 
 
 class CheckpointStore:
@@ -204,6 +204,15 @@ class CheckpointStore:
         end_dt = as_utc(end_dt)
         if start_dt > end_dt:
             return []
+        invalid_count = 0
+        retry_incomplete = False
+
+        def record_invalid(event: InvalidIssue) -> None:
+            nonlocal invalid_count
+            invalid_count += 1
+            if invalid_row_cb:
+                invalid_row_cb(event)
+
         checkpoint = self.template.format(project=project)
         issues = []
         fetch_start = start_dt
@@ -226,7 +235,7 @@ class CheckpointStore:
                     saved["issues"],
                     start_dt,
                     saved_end,
-                    invalid_row_cb=invalid_row_cb,
+                    invalid_row_cb=record_invalid,
                 )
                 for i, issue in enumerate(issues):
                     if (
@@ -237,17 +246,23 @@ class CheckpointStore:
                         issues[i] = enrich_issue_assets(
                             issue, category_resolver=category_resolver
                         )
+                retry_incomplete = bool(saved.get("invalid_rows", 0))
                 fetch_start = max(start_dt, saved_end)
         partial, oldest_partial, partial_end = ([], None, None)
         if resume:
             partial, oldest_partial, partial_end = self.load_partial(
-                project, start_dt, invalid_row_cb=invalid_row_cb
+                project, start_dt, invalid_row_cb=record_invalid
             )
             if partial:
                 self._say(
                     f"[{project}] resuming: {len(partial)} issues already saved, oldest {oldest_partial.isoformat()}",
                     flush=True,
                 )
+        if retry_incomplete or invalid_count:
+            # Rejected records have no trustworthy creation time. Retry the
+            # entire requested coverage rather than claiming a complete tail.
+            fetch_start = start_dt
+            oldest_partial = None
         started = time.time()
         windows = []
         if oldest_partial is None:
@@ -281,15 +296,15 @@ class CheckpointStore:
                     partial_cb=append,
                     partial_every=self.save_every,
                     category_resolver=category_resolver,
-                    invalid_row_cb=invalid_row_cb,
+                    invalid_row_cb=record_invalid,
                 )
             )
         fresh = filter_issue_window(
-            project, fresh, start_dt, end_dt, invalid_row_cb=invalid_row_cb
+            project, fresh, start_dt, end_dt, invalid_row_cb=record_invalid
         )
         issues = dedupe_issues(issues + partial + fresh)
         issues = filter_issue_window(
-            project, issues, start_dt, end_dt, invalid_row_cb=invalid_row_cb
+            project, issues, start_dt, end_dt, invalid_row_cb=record_invalid
         )
         write_json_atomic(
             checkpoint,
@@ -301,6 +316,7 @@ class CheckpointStore:
                 "assets_cloud_id": CLOUD_ID,
                 "assets_workspace_id": WORKSPACE_ID,
                 "issues": issues,
+                "invalid_rows": invalid_count,
             },
         )
         self.clear_partial(project)

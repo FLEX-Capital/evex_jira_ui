@@ -146,7 +146,7 @@ if df.empty:
     ):
         render_history_pull()
     st.stop()
-if "completion_state" not in df:
+if "completion_state" not in df or df["completion_state"].isna().any():
     df = enrich_jira_time_metrics(df)
 for group_column in ("Hauptkategorie", "status_category", "status", "zentrale"):
     if group_column in df:

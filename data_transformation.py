@@ -492,7 +492,7 @@ def _load_service_desk_issues(
     )
     for column in ("created", "updated", "currentstatus_date"):
         df[column] = pd.to_datetime(
-            df[column], errors="coerce", utc=True
+            df[column], errors="coerce", utc=True, format="mixed"
         ).dt.tz_convert(TZ)
 
     df = enrich_jira_time_metrics(df, subdiv="BW")

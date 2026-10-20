@@ -25,7 +25,7 @@ def generate_distinct_colors(n):
 
 def create_resolution_time_charts(df: pd.DataFrame) -> list[go.Figure]:
     """Build duration charts accounting for every canonical completed ticket."""
-    if "completion_state" not in df:
+    if "completion_state" not in df or df["completion_state"].isna().any():
         from data_transformation import enrich_jira_time_metrics
 
         df = enrich_jira_time_metrics(df)
