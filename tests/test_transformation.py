@@ -125,7 +125,7 @@ class TransformationTests(unittest.TestCase):
         old, _ = asset_migration.migrate_categories(old, fetch=denied)
         for fails in (False, True):
 
-            def fetch(cloud, workspace, oid, fails=fails):
+            def fetch(cloud, workspace, oid, fails=fails, **kwargs):
                 if fails and oid == "main-1":
                     raise PermissionError("denied")
                 return {"id": oid, "label": "Recovered"}
@@ -169,8 +169,8 @@ class TransformationTests(unittest.TestCase):
         raw = issue(
             links=linked,
             asset_labels={"main-1": "Hardware", "sub-1": "Printer"},
-            assets_workspace_id="normal-workspace",
-            assets_cloud_id="cloud-1",
+            assets_workspace_id=jira_loader.WORKSPACE_ID,
+            assets_cloud_id=jira_loader.CLOUD_ID,
             asset_errors=["main-2: HTTP 403"],
         )
         with patch.object(
@@ -197,8 +197,8 @@ class TransformationTests(unittest.TestCase):
         """Catches unresolved normal IDs being mislabeled by the legacy map."""
         raw = issue(
             asset_labels={},
-            assets_workspace_id="normal-workspace",
-            assets_cloud_id="cloud-1",
+            assets_workspace_id=jira_loader.WORKSPACE_ID,
+            assets_cloud_id=jira_loader.CLOUD_ID,
         )
         with patch.dict(
             self.transformation.object_id_to_name, {"main-1": "Stale sandbox label"}

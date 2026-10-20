@@ -35,7 +35,7 @@ def test_only_explicit_source_policy_repairs_missing_origins(storage, monkeypatc
     monkeypatch.setattr(sync_checkpoints, "fetch_jira_issues", lambda *a, **k: [fresh])
     queried = []
 
-    def fields(keys, wanted):
+    def fields(keys, wanted, **kwargs):
         queried.extend(keys)
         assert wanted == ["customfield_10675"]
         return {key: {"customfield_10675": {"value": "Telefon"}} for key in keys}

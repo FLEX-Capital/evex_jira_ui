@@ -1,17 +1,20 @@
 """Resolve category labels and prepare identity-checked, narrow cache repairs."""
 
 import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from functools import partial
+from typing import Any
 
 import pandas as pd
 import requests
 
-CATEGORY_FIELDS = (
-    ("customfield_10680", "main_category_id", "Hauptkategorie"),
-    ("customfield_10679", "sub_category_id", "Unterkategorie"),
-)
+import service_desks as desks
+from settings import Settings, load_settings
+
+CATEGORY_FIELDS = desks.category_fields()
 UNASSIGNED = "Nicht zugeordnet"
 
 
@@ -51,10 +54,17 @@ def _retry_delay(response, fallback):
 class CategoryResolver:
     """One lookup budget per full identity, including failures, for one import."""
 
-    def __init__(self, fetch=None, sleep=None):
+    def __init__(
+        self,
+        fetch: Callable[[str, str, str], Mapping[str, Any]] | None = None,
+        sleep: Callable[[float], None] | None = None,
+        *,
+        settings: Settings | None = None,
+    ) -> None:
+        self.settings = settings or load_settings()
         self.fetch = fetch
         self.sleep = sleep or time.sleep
-        self.results = {}
+        self.results: dict[tuple[str, str, str], CategoryLookup] = {}
 
     def resolve(self, cloud_id, workspace_id, object_id):
         identity = (cloud_id, workspace_id, str(object_id))
@@ -64,7 +74,7 @@ class CategoryResolver:
         if fetch is None:
             from jira_loader import fetch_asset_object_uncached
 
-            fetch = fetch_asset_object_uncached
+            fetch = partial(fetch_asset_object_uncached, settings=self.settings)
         error = "Unresolved category"
         for attempt in range(1, 4):
             try:
@@ -91,10 +101,12 @@ class CategoryResolver:
         return result
 
 
-def fetch_category_references(keys):
+def fetch_category_references(keys, *, settings=None):
     from source_sync import fetch_issue_fields
 
-    return fetch_issue_fields(keys, [f[0] for f in CATEGORY_FIELDS] + ["updated"])
+    return fetch_issue_fields(
+        keys, [f[0] for f in desks.category_fields()] + ["updated"], settings=settings
+    )
 
 
 @dataclass(frozen=True)
@@ -120,15 +132,15 @@ class CategoryRepairReport:
 
 
 def prepare_category_repairs(
-    frame, *, references=None, resolver=None, reference_loader=None
+    frame, *, references=None, resolver=None, reference_loader=None, settings=None
 ):
-    from jira_loader import CLOUD_ID, WORKSPACE_ID
-
-    resolver = resolver or CategoryResolver()
+    config = settings or getattr(resolver, "settings", None) or load_settings()
+    tenant = config.tenant
+    resolver = resolver or CategoryResolver(settings=config)
     references = dict(references or {})
     candidates = []
     for _, row in frame.iterrows():
-        for raw_field, id_column, label_column in CATEGORY_FIELDS:
+        for raw_field, id_column, label_column in desks.category_fields():
             if (id_column in frame or label_column in frame) and unknown(
                 row.get(label_column)
             ):
@@ -140,7 +152,10 @@ def prepare_category_repairs(
     if missing_keys:
         try:
             references.update(
-                (reference_loader or fetch_category_references)(missing_keys)
+                (
+                    reference_loader
+                    or partial(fetch_category_references, settings=config)
+                )(missing_keys)
             )
         except (
             requests.RequestException,
@@ -166,14 +181,16 @@ def prepare_category_repairs(
         else:
             oid = text_value(refs[0].get("objectId"))
             workspace = refs[0].get("workspaceId")
-            if not oid or workspace != WORKSPACE_ID:
+            if not oid or workspace != tenant.workspace_id:
                 error = "Unresolved workspace reference"
             else:
-                lookup = resolver.resolve(CLOUD_ID, workspace, oid)
+                lookup = resolver.resolve(tenant.cloud_id, workspace, oid)
                 label, error = lookup.label, lookup.error
         if error:
             report.unresolved_cells += 1
-            identity = f"{CLOUD_ID}/{workspace}/{oid}" if oid else f"{key}/{raw_field}"
+            identity = (
+                f"{tenant.cloud_id}/{workspace}/{oid}" if oid else f"{key}/{raw_field}"
+            )
             report.failed_objects[identity] = error
             continue
         patches.append(
@@ -234,6 +251,6 @@ def apply_category_repairs(current, patches):
 def unresolved_cells(frame):
     return sum(
         int(frame[label].map(unknown).sum())
-        for _, _, label in CATEGORY_FIELDS
+        for _, _, label in desks.category_fields()
         if label in frame
     )

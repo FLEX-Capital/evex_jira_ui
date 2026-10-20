@@ -7,13 +7,18 @@ Customer/branch columns are reference IDs, not enriched customer records.
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 
 import requests
 
-from jira_loader import CLOUD_ID, WORKSPACE_ID, fetch_asset_object
+from jira_loader import fetch_asset_object
+from settings import load_settings
 
 
-def migrate_categories(frame, *, fetch=fetch_asset_object, workers=4):
+def migrate_categories(frame, *, fetch=None, workers=4, settings=None):
+    config = settings or load_settings()
+    tenant = config.tenant
+    fetch = fetch or partial(fetch_asset_object, settings=config)
     result = frame.copy()
     ids = set()
     for column in ("main_category_id", "sub_category_id"):
@@ -22,7 +27,7 @@ def migrate_categories(frame, *, fetch=fetch_asset_object, workers=4):
 
     def resolve(oid):
         try:
-            asset = fetch(CLOUD_ID, WORKSPACE_ID, oid)
+            asset = fetch(tenant.cloud_id, tenant.workspace_id, oid)
             if str(asset.get("id")) != oid:
                 raise ValueError("Assets returned a different object identity")
             label = asset.get("label") or asset.get("name")
@@ -53,20 +58,20 @@ def migrate_categories(frame, *, fetch=fetch_asset_object, workers=4):
 
 def main():
     from data_loading import load_data_snapshot, save_data_if_unchanged
-    from settings import load_settings
 
-    ticket_path = load_settings().paths.tickets
+    config = load_settings()
+    ticket_path = config.paths.tickets
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workers", type=int, default=4)
     args = parser.parse_args()
     if args.workers < 1:
         parser.error("--workers must be positive")
-    frame, revision = load_data_snapshot(path=ticket_path)
+    frame, revision = load_data_snapshot(path=ticket_path, settings=config)
     if frame is None or frame.empty:
         print("No cached categories to migrate.")
         return
     # Refuse a stale overwrite if another process refreshed during the API reads.
-    result, report = migrate_categories(frame, workers=args.workers)
+    result, report = migrate_categories(frame, workers=args.workers, settings=config)
     if report["failed_objects"]:
         raise SystemExit(
             f"Category migration: {report}. Cache unchanged: category lookups "
@@ -74,7 +79,7 @@ def main():
             "configured as JIRA_USERNAME and retry."
         )
     backup = save_data_if_unchanged(
-        result, revision, backup_prefix="assets", path=ticket_path
+        result, revision, backup_prefix="assets", path=ticket_path, settings=config
     )
     print(f"Cache backup: {backup}")
     print(f"Category migration: {report}")

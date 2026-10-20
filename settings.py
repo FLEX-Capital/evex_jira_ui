@@ -9,6 +9,7 @@ from uuid import UUID
 
 DEFAULT_CLOUD_ID = "242cf880-c51a-4277-9381-781d5ae181df"
 DEFAULT_WORKSPACE_ID = "9926cb30-3f07-4fb2-9c83-aa4fc551c721"
+TENANT_ATTR = "evex_jira_tenant"
 DEFAULT_API_VERSION = "2024-10-21"
 PROJECT_ROOT = Path(__file__).resolve().parent
 
@@ -28,6 +29,13 @@ class TenantIdentity:
 
     cloud_id: str
     workspace_id: str
+
+    def as_dict(self) -> dict[str, str]:
+        """Return the serializable full tenant identity for owned artifacts."""
+        return {"cloud_id": self.cloud_id, "workspace_id": self.workspace_id}
+
+
+DEFAULT_TENANT = TenantIdentity(DEFAULT_CLOUD_ID, DEFAULT_WORKSPACE_ID)
 
 
 @dataclass(frozen=True)

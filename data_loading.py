@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from settings import load_settings
+from settings import DEFAULT_TENANT, TENANT_ATTR, SettingsError, load_settings
 
 DATA_PATH = "data/jira_data.pkl"
 _mutex = threading.RLock()
@@ -76,14 +76,16 @@ def cache_revision(path=None):
     return stat.st_ino, stat.st_size, stat.st_mtime_ns
 
 
-def load_data_snapshot(path=None):
+def load_data_snapshot(path=None, *, settings=None):
     """Read a coherent frame and revision for a later conditional save."""
     target = _ticket_path(path)
     with cache_lock(target):
-        return load_data(path=target), cache_revision(target)
+        return load_data(path=target, settings=settings), cache_revision(target)
 
 
-def save_data_if_unchanged(df, revision, *, backup_prefix=None, path=None):
+def save_data_if_unchanged(
+    df, revision, *, backup_prefix=None, path=None, settings=None
+):
     """Commit a snapshot only if no writer has replaced its input meanwhile."""
     target = _ticket_path(path)
     with cache_lock(target):
@@ -97,7 +99,7 @@ def save_data_if_unchanged(df, revision, *, backup_prefix=None, path=None):
                 f"{target}.bak-{backup_prefix}-{datetime.now(UTC):%Y%m%d-%H%M%S-%f}"
             )
             shutil.copy2(target, backup)
-        save_data(df, path=target)
+        save_data(df, path=target, settings=settings)
         return backup
 
 
@@ -122,14 +124,19 @@ def drop_obsolete_columns(df):
     return df.drop(columns=present) if present else df
 
 
-def save_data(df, *, path=None):
+def save_data(df, *, path=None, settings=None):
     target = _ticket_path(path)
     with cache_lock(target):
-        _save_data_unlocked(df, path=target)
+        _save_data_unlocked(df, path=target, settings=settings)
 
 
-def _save_data_unlocked(df, *, path=None):
-    df = drop_obsolete_columns(df)
+def _save_data_unlocked(df, *, path=None, settings=None):
+    config = settings or load_settings()
+    df = drop_obsolete_columns(df).copy()
+    identity = config.tenant.as_dict()
+    if TENANT_ATTR in df.attrs and df.attrs[TENANT_ATTR] != identity:
+        raise SettingsError("tenant_mismatch", ("JIRA_CLOUD_ID", "JIRA_WORKSPACE_ID"))
+    df.attrs[TENANT_ATTR] = identity
     path = _ticket_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
@@ -143,7 +150,7 @@ def _save_data_unlocked(df, *, path=None):
             os.unlink(temporary)
 
 
-def load_data(*, path=None):
+def load_data(*, path=None, settings=None):
     path = _ticket_path(path)
     if path.exists():
         with path.open("rb") as f:
@@ -151,5 +158,18 @@ def load_data(*, path=None):
             # so it is not untrusted input. If the cache ever becomes something
             # a third party can supply, switch to a non-executable format
             # (e.g. parquet) instead of suppressing this.
-            return drop_obsolete_columns(pickle.load(f))  # nosec B301
+            frame = drop_obsolete_columns(pickle.load(f))  # nosec B301
+        config = settings or load_settings()
+        identity = frame.attrs.get(TENANT_ATTR)
+        if identity is None:
+            if config.tenant != DEFAULT_TENANT:
+                raise SettingsError(
+                    "legacy_tenant_unknown", ("JIRA_CLOUD_ID", "JIRA_WORKSPACE_ID")
+                )
+        elif identity != config.tenant.as_dict():
+            raise SettingsError(
+                "tenant_mismatch", ("JIRA_CLOUD_ID", "JIRA_WORKSPACE_ID")
+            )
+        frame.attrs[TENANT_ATTR] = config.tenant.as_dict()
+        return frame
     return None

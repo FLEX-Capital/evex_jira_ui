@@ -40,12 +40,12 @@ def storage(tmp_path, monkeypatch):
     monkeypatch.setattr(
         jira_loader,
         "fetch_asset_object_uncached",
-        lambda c, w, oid: {"id": oid, "label": "Resolved"},
+        lambda c, w, oid, **kwargs: {"id": oid, "label": "Resolved"},
     )
     monkeypatch.setattr(
         category_sync,
         "fetch_category_references",
-        lambda keys: {key: raw()["fields"] for key in keys},
+        lambda keys, **kwargs: {key: raw()["fields"] for key in keys},
     )
     monkeypatch.setattr(asset_country, "load_cache", lambda *a, **k: {})
     return path

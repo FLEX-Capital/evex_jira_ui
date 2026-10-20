@@ -4,10 +4,11 @@ import re
 
 import requests
 
+import service_desks as desks
 from settings import load_settings
 
 
-def fetch_issue_fields(keys, fields):
+def fetch_issue_fields(keys, fields, *, settings=None):
     """Batch-read selected fields; omitted issues/fields stay distinguishable."""
     keys = list(dict.fromkeys(keys))
     if not keys:
@@ -15,7 +16,7 @@ def fetch_issue_fields(keys, fields):
     if any(not re.fullmatch(r"[A-Z][A-Z0-9_]*-\d+", key) for key in keys):
         raise ValueError("Invalid Jira ticket key in the cache.")
 
-    connection = load_settings().require_jira()
+    connection = (settings or load_settings()).require_jira()
     base = connection.url
 
     results = {}
@@ -47,12 +48,14 @@ def fetch_issue_fields(keys, fields):
     return results
 
 
-def fetch_issue_sources(keys):
+def fetch_issue_sources(keys, *, settings=None):
     """Read just the source field, leaving absent/inaccessible issues untouched."""
     return {
-        key: (fields["customfield_10675"] or {}).get("value", "")
-        for key, fields in fetch_issue_fields(keys, ["customfield_10675"]).items()
-        if "customfield_10675" in fields
+        key: (fields[desks.FIELDS.source] or {}).get("value", "")
+        for key, fields in fetch_issue_fields(
+            keys, [desks.FIELDS.source], settings=settings
+        ).items()
+        if desks.FIELDS.source in fields
     }
 
 

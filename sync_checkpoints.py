@@ -9,14 +9,12 @@ from pathlib import Path
 
 from desk_sync import write_json_atomic
 from jira_loader import (
-    CLOUD_ID,
-    WORKSPACE_ID,
     dedupe_issues,
     enrich_issue_assets,
     fetch_jira_issues,
 )
 from service_desks import InvalidIssue, as_utc, effective_start, filter_issue_window
-from settings import load_settings
+from settings import DEFAULT_TENANT, Settings, load_settings
 
 
 class CheckpointStore:
@@ -25,9 +23,12 @@ class CheckpointStore:
         checkpoint_dir: str | Path | None = None,
         *,
         progress: Callable[[str], None] | None = None,
+        settings: Settings | None = None,
     ) -> None:
+        self.settings = settings or load_settings()
+        self.tenant = self.settings.tenant
         checkpoint_dir = (
-            load_settings().paths.root if checkpoint_dir is None else checkpoint_dir
+            self.settings.paths.root if checkpoint_dir is None else checkpoint_dir
         )
         self.template = str(Path(checkpoint_dir) / "backfill_{project}.json")
         self.save_every = 100
@@ -73,8 +74,8 @@ class CheckpointStore:
                 "project": project,
                 "start": start_dt.isoformat(),
                 "end": end_dt.isoformat(),
-                "assets_cloud_id": CLOUD_ID,
-                "assets_workspace_id": WORKSPACE_ID,
+                "assets_cloud_id": self.tenant.cloud_id,
+                "assets_workspace_id": self.tenant.workspace_id,
             },
         )
         open(log_path, "w").close()
@@ -140,8 +141,8 @@ class CheckpointStore:
             meta = json.load(handle)
         if (
             meta.get("project") != project
-            or meta.get("assets_cloud_id") != CLOUD_ID
-            or meta.get("assets_workspace_id") != WORKSPACE_ID
+            or meta.get("assets_cloud_id") != self.tenant.cloud_id
+            or meta.get("assets_workspace_id") != self.tenant.workspace_id
             or (as_utc(datetime.fromisoformat(meta["start"])) != start_dt)
         ):
             return ([], None, None)
@@ -230,6 +231,18 @@ class CheckpointStore:
             with open(checkpoint) as f:
                 saved = json.load(f)
             if saved.get("version") == 2:
+                saved_tenant = (
+                    saved.get("assets_cloud_id"),
+                    saved.get("assets_workspace_id"),
+                )
+                legacy_default = (
+                    saved_tenant == (None, None) and self.tenant == DEFAULT_TENANT
+                )
+                if not legacy_default and saved_tenant != (
+                    self.tenant.cloud_id,
+                    self.tenant.workspace_id,
+                ):
+                    raise ValueError(f"{project}: checkpoint tenant/workspace mismatch")
                 saved_start = as_utc(datetime.fromisoformat(saved["start"]))
                 if saved.get("project") != project or saved_start > start_dt:
                     raise ValueError(
@@ -249,12 +262,14 @@ class CheckpointStore:
                 )
                 for i, issue in enumerate(issues):
                     if (
-                        issue.get("assets_cloud_id") != CLOUD_ID
-                        or issue.get("assets_workspace_id") != WORKSPACE_ID
+                        issue.get("assets_cloud_id") != self.tenant.cloud_id
+                        or issue.get("assets_workspace_id") != self.tenant.workspace_id
                         or issue.get("asset_errors")
                     ):
                         issues[i] = enrich_issue_assets(
-                            issue, category_resolver=category_resolver
+                            issue,
+                            category_resolver=category_resolver,
+                            settings=self.settings,
                         )
                 retry_incomplete = bool(saved.get("invalid_rows", 0))
                 fetch_start = max(start_dt, saved_end)
@@ -307,6 +322,7 @@ class CheckpointStore:
                     partial_every=self.save_every,
                     category_resolver=category_resolver,
                     invalid_row_cb=record_invalid,
+                    settings=self.settings,
                 )
             )
         fresh = filter_issue_window(
@@ -323,8 +339,8 @@ class CheckpointStore:
                 "project": project,
                 "start": start_dt.isoformat(),
                 "end": end_dt.isoformat(),
-                "assets_cloud_id": CLOUD_ID,
-                "assets_workspace_id": WORKSPACE_ID,
+                "assets_cloud_id": self.tenant.cloud_id,
+                "assets_workspace_id": self.tenant.workspace_id,
                 "issues": issues,
                 "invalid_rows": invalid_count,
             },
@@ -344,8 +360,11 @@ def fetch_project(
     category_resolver=None,
     progress=None,
     invalid_row_cb=None,
+    settings=None,
 ):
-    return CheckpointStore(checkpoint_dir, progress=progress).fetch_project(
+    return CheckpointStore(
+        checkpoint_dir, progress=progress, settings=settings
+    ).fetch_project(
         project,
         start_dt,
         end_dt,

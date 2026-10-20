@@ -1,12 +1,12 @@
 """Desk identity and import boundaries, independent of Jira credentials."""
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import UTC, date, datetime, time
 from typing import Any, Literal
-from zoneinfo import ZoneInfo
 
-BERLIN = ZoneInfo("Europe/Berlin")
+from reporting_policy import BERLIN
+
 # Earliest day the date pickers offer. Without an explicit minimum, Streamlit only
 # reaches ten years before a picker's default, hiding older imported tickets.
 EARLIEST_DAY = date(1970, 1, 1)
@@ -20,11 +20,18 @@ class ServiceDesk:
     project_id: str | None = None
     service_desk_id: str | None = None
     earliest_created: datetime | None = None
+    clone_project: str | None = None
+    clone_of_clone_project: str | None = None
+    comment_separator: str = "\n--------------------------------\n"
 
 
 DESKS = (
-    ServiceDesk("SDIPR", "Ipro", "IPRO"),
-    ServiceDesk("SDAX", "Amparex", "Amparex"),
+    ServiceDesk(
+        "SDIPR", "Ipro", "IPRO", clone_project="EXIPR", comment_separator="\n\n"
+    ),
+    ServiceDesk(
+        "SDAX", "Amparex", "Amparex", clone_project="EXAX", clone_of_clone_project="AX"
+    ),
     ServiceDesk(
         "SDEU",
         "Euronet",
@@ -35,6 +42,49 @@ DESKS = (
 )
 BY_KEY = {desk.key: desk for desk in DESKS}
 COMPANY_LABELS = [desk.label for desk in DESKS]
+
+
+@dataclass(frozen=True)
+class JiraFields:
+    """Supported custom fields shared by fetch, transformation and repair."""
+
+    request: str = "customfield_10010"
+    categories: str = "customfield_10065"
+    central: str = "customfield_10673"
+    branch: str = "customfield_10674"
+    source: str = "customfield_10675"
+    sub_category: str = "customfield_10679"
+    main_category: str = "customfield_10680"
+    contact: str = "customfield_10689"
+
+    def retained(self) -> tuple[str, ...]:
+        """Return the unique standard/custom field union consumed downstream."""
+        standard = (
+            "summary",
+            "description",
+            "status",
+            "created",
+            "updated",
+            "labels",
+            "priority",
+            "issuetype",
+            "issuelinks",
+            "comment",
+        )
+        return tuple(
+            dict.fromkeys((*standard, *(getattr(self, f.name) for f in fields(self))))
+        )
+
+
+FIELDS = JiraFields()
+
+
+def category_fields() -> tuple[tuple[str, str, str], ...]:
+    """Derive category repair columns from the active immutable field map."""
+    return (
+        (FIELDS.main_category, "main_category_id", "Hauptkategorie"),
+        (FIELDS.sub_category, "sub_category_id", "Unterkategorie"),
+    )
 
 
 def selected_projects(projects=None):
@@ -57,7 +107,7 @@ def berlin_day_end(day):
 def as_utc(value):
     """Treat legacy naive CLI timestamps as Berlin dates, then normalize."""
     if value.tzinfo is None:
-        value = value.replace(tzinfo=ZoneInfo("Europe/Berlin"))
+        value = value.replace(tzinfo=BERLIN)
     return value.astimezone(UTC)
 
 

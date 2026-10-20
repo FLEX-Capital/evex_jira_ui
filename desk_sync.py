@@ -6,13 +6,14 @@ import os
 import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from uuid import uuid4
 
 import pandas as pd
 
+import service_desks as desks
 from category_sync import (
-    CATEGORY_FIELDS,
     CategoryLookup,
     CategoryRepairReport,
     CategoryResolver,
@@ -23,7 +24,7 @@ from category_sync import (
     unresolved_cells,
 )
 from service_desks import BY_KEY, InvalidIssue
-from settings import load_settings
+from settings import DEFAULT_TENANT, TENANT_ATTR, load_settings
 
 
 def write_json_atomic(path, value):
@@ -152,32 +153,39 @@ def status_path(data_path):
 
 
 def _seed_category_context(issues, resolver, references):
-    from jira_loader import CLOUD_ID, WORKSPACE_ID
+    tenant = resolver.settings.tenant
 
     for issue in issues:
         fields = issue.get("fields") or {}
         references[issue["key"]] = {
             k: fields[k]
-            for k in [f[0] for f in CATEGORY_FIELDS] + ["updated"]
+            for k in [f[0] for f in desks.category_fields()] + ["updated"]
             if k in fields
         }
-        for field_name, _, _ in CATEGORY_FIELDS:
+        for field_name, _, _ in desks.category_fields():
             refs = fields.get(field_name) or []
             if not refs:
                 continue
             ref = refs[0]
             oid = str(ref.get("objectId", ""))
             label = (issue.get("asset_labels") or {}).get(oid)
-            if ref.get("workspaceId") == WORKSPACE_ID and label:
+            identity = (issue.get("assets_cloud_id"), issue.get("assets_workspace_id"))
+            if identity != (tenant.cloud_id, tenant.workspace_id):
+                if identity != (None, None) or tenant != DEFAULT_TENANT:
+                    label = None
+            if ref.get("workspaceId") == tenant.workspace_id and label:
                 resolver.results.setdefault(
-                    (CLOUD_ID, WORKSPACE_ID, oid), CategoryLookup(str(label), None, 0)
+                    (tenant.cloud_id, tenant.workspace_id, oid),
+                    CategoryLookup(str(label), None, 0),
                 )
 
 
-def _keep_valid_category_labels(baseline, incoming, references):
-    from jira_loader import WORKSPACE_ID
+def _keep_valid_category_labels(baseline, incoming, references, *, settings=None):
+    tenant = (settings or load_settings()).tenant
 
     result = incoming.copy()
+    if baseline.attrs.get(TENANT_ATTR) != tenant.as_dict():
+        return result
     if baseline.empty or "key" not in baseline or "key" not in incoming:
         return result
     prior = baseline.drop_duplicates("key", keep="last").set_index("key")
@@ -185,11 +193,11 @@ def _keep_valid_category_labels(baseline, incoming, references):
         key = row["key"]
         if key not in prior.index:
             continue
-        for raw_field, id_col, label_col in CATEGORY_FIELDS:
+        for raw_field, id_col, label_col in desks.category_fields():
             refs = references.get(key, {}).get(raw_field) or []
             if (
                 refs
-                and refs[0].get("workspaceId") == WORKSPACE_ID
+                and refs[0].get("workspaceId") == tenant.workspace_id
                 and text_value(row.get(id_col))
                 == text_value(prior.loc[key].get(id_col))
                 and unknown(row.get(label_col))
@@ -208,7 +216,7 @@ def _repair_input(candidate, baseline):
     for index, row in result.iterrows():
         if row["key"] in prior.index:
             old = prior.loc[row["key"]]
-            for _, id_col, label_col in CATEGORY_FIELDS:
+            for _, id_col, label_col in desks.category_fields():
                 if label_col in old and unknown(old[label_col]):
                     result.loc[index, label_col] = old[label_col]
                     result.loc[index, id_col] = old.get(id_col, "")
@@ -216,15 +224,17 @@ def _repair_input(candidate, baseline):
 
 
 def _remaining_asset_failure(errors, resolver):
-    from jira_loader import CLOUD_ID, WORKSPACE_ID
+    tenant = resolver.settings.tenant
 
     for error in errors:
         repaired = False
-        for field_name, _, _ in CATEGORY_FIELDS:
+        for field_name, _, _ in desks.category_fields():
             prefix = f"{field_name}/"
             if error.startswith(prefix):
                 oid = error[len(prefix) :].split(":", 1)[0]
-                lookup = resolver.results.get((CLOUD_ID, WORKSPACE_ID, oid))
+                lookup = resolver.results.get(
+                    (tenant.cloud_id, tenant.workspace_id, oid)
+                )
                 repaired = lookup is not None and lookup.label is not None
         if not repaired:
             return True
@@ -284,10 +294,11 @@ def run_sync(request, *, progress=None, data_path=None):
     import data_loading
     import sync_checkpoints
     from data_transformation import load_project_issues
-    from source_sync import refresh_missing_sources
+    from source_sync import fetch_issue_sources, refresh_missing_sources
 
     # Freeze paths before handing off a worker; never consult a mutable default later.
-    data_path = Path(data_path or load_settings().paths.tickets).resolve()
+    config = load_settings()
+    data_path = Path(data_path or config.paths.tickets).resolve()
     request = make_sync_request(
         request.start,
         request.end,
@@ -315,13 +326,17 @@ def run_sync(request, *, progress=None, data_path=None):
 
         emit("Import wird gestartet", "admitted")
         try:
-            baseline, _ = data_loading.load_data_snapshot(path=data_path)
+            baseline, _ = data_loading.load_data_snapshot(
+                path=data_path, settings=config
+            )
             baseline = baseline if baseline is not None else pd.DataFrame()
             frames, references, failures = [], {}, {}
             from asset_country import load_cache
 
-            country_cache = load_cache(data_path.parent / "asset_country.json")
-            resolver = CategoryResolver()
+            country_cache = load_cache(
+                data_path.parent / "asset_country.json", settings=config
+            )
+            resolver = CategoryResolver(settings=config)
 
             def invalid_row(event: InvalidIssue) -> None:
                 report.invalid_rows[event.project] = (
@@ -341,6 +356,7 @@ def run_sync(request, *, progress=None, data_path=None):
                         request.resume,
                         checkpoint_dir=data_path.parent,
                         category_resolver=resolver,
+                        settings=config,
                         invalid_row_cb=invalid_row,
                         progress=lambda message, project=project: emit(
                             message, project=project
@@ -350,7 +366,10 @@ def run_sync(request, *, progress=None, data_path=None):
                     if issues:
                         frames.append(
                             load_project_issues(
-                                project, issues, country_cache=country_cache
+                                project,
+                                issues,
+                                country_cache=country_cache,
+                                settings=config,
                             )
                         )
                     failures[project] = [
@@ -366,7 +385,9 @@ def run_sync(request, *, progress=None, data_path=None):
                 incoming = (
                     pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
                 )
-                incoming = _keep_valid_category_labels(baseline, incoming, references)
+                incoming = _keep_valid_category_labels(
+                    baseline, incoming, references, settings=config
+                )
                 candidate, _ = merge_import(baseline, incoming, baseline)
                 emit(
                     "Unbekannte Haupt- und Unterkategorien werden aufgelöst",
@@ -376,11 +397,15 @@ def run_sync(request, *, progress=None, data_path=None):
                     _repair_input(candidate, baseline),
                     references=references,
                     resolver=resolver,
+                    settings=config,
                 )
                 source_patches = []
                 if request.repair_sources and not candidate.empty:
                     try:
-                        repaired, _ = refresh_missing_sources(candidate)
+                        repaired, _ = refresh_missing_sources(
+                            candidate,
+                            fetch_sources=partial(fetch_issue_sources, settings=config),
+                        )
                         for index, row in candidate.iterrows():
                             if not text_value(row.get("source")) and text_value(
                                 repaired.loc[index].get("source")
@@ -400,7 +425,9 @@ def run_sync(request, *, progress=None, data_path=None):
                 }
                 emit("Ergebnisse werden gespeichert", "commit")
                 with data_loading.cache_lock(data_path):
-                    current, revision = data_loading.load_data_snapshot(path=data_path)
+                    current, revision = data_loading.load_data_snapshot(
+                        path=data_path, settings=config
+                    )
                     current = current if current is not None else pd.DataFrame()
                     merged, report.protected_rows = merge_import(
                         current, incoming, baseline
@@ -439,8 +466,13 @@ def run_sync(request, *, progress=None, data_path=None):
                                 report.source_updates += 1
                     report.categories.unresolved_cells = unresolved_cells(merged)
                     if not current.equals(merged):
+                        merged.attrs[TENANT_ATTR] = config.tenant.as_dict()
                         data_loading.save_data_if_unchanged(
-                            merged, revision, backup_prefix="sync", path=data_path
+                            merged,
+                            revision,
+                            backup_prefix="sync",
+                            path=data_path,
+                            settings=config,
                         )
                         report.committed = True
                     report.rows = len(merged)

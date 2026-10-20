@@ -3,7 +3,7 @@ import re
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from enum import Enum
-from functools import cache
+from functools import cache, partial
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -11,21 +11,28 @@ from zoneinfo import ZoneInfo
 import requests
 from jira import JIRA
 
+import service_desks as desks
 from service_desks import InvalidIssue, as_utc, effective_start, filter_issue_window
-from settings import JiraConnection, load_settings
+from settings import (
+    DEFAULT_CLOUD_ID,
+    DEFAULT_WORKSPACE_ID,
+    JiraConnection,
+    Settings,
+    load_settings,
+)
 
-CLOUD_ID = "242cf880-c51a-4277-9381-781d5ae181df"
+CLOUD_ID = DEFAULT_CLOUD_ID
 
-WORKSPACE_ID = "9926cb30-3f07-4fb2-9c83-aa4fc551c721"
-
-
-def _require_credentials() -> JiraConnection:
-    return load_settings().require_jira()
+WORKSPACE_ID = DEFAULT_WORKSPACE_ID
 
 
-def jira_request(url, params=None, timeout=30):
+def _require_credentials(settings: Settings | None = None) -> JiraConnection:
+    return (settings or load_settings()).require_jira()
+
+
+def jira_request(url, params=None, timeout=30, *, settings=None):
     """Helper function to make authenticated requests to the JIRA API."""
-    connection = _require_credentials()
+    connection = _require_credentials(settings)
     response = requests.get(
         url,
         auth=(connection.username, connection.password),
@@ -38,45 +45,75 @@ def jira_request(url, params=None, timeout=30):
 
 
 @cache
+def _cached_asset(
+    cloud_id: str, workspace_id: str, object_id: str | None, settings: Settings
+) -> dict[str, Any]:
+    return fetch_asset_object_uncached(
+        cloud_id, workspace_id, object_id, settings=settings
+    )
+
+
 def fetch_asset_object(
-    cloud_id: str = CLOUD_ID,
-    workspace_id: str = WORKSPACE_ID,
+    cloud_id: str | None = None,
+    workspace_id: str | None = None,
     object_id: str | None = None,
-):
-    """Cache successful Assets responses for existing non-category callers."""
-    return fetch_asset_object_uncached(cloud_id, workspace_id, object_id)
+    *,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    """Cache a successful Assets lookup by full tenant and settings snapshot."""
+    config = settings or load_settings()
+    cloud_id = config.tenant.cloud_id if cloud_id is None else cloud_id
+    workspace_id = config.tenant.workspace_id if workspace_id is None else workspace_id
+    return _cached_asset(cloud_id, workspace_id, object_id, config)
 
 
-def fetch_asset_object_uncached(cloud_id, workspace_id, object_id):
-    """Read an Assets object without retaining an unlabeled response."""
+# Preserve the existing explicit cache-management adapter.
+setattr(fetch_asset_object, "cache_clear", _cached_asset.cache_clear)
+
+
+def fetch_asset_object_uncached(
+    cloud_id: str,
+    workspace_id: str,
+    object_id: str | None,
+    *,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    """Read an Assets object under one captured credential snapshot."""
     url = f"https://api.atlassian.com/ex/jira/{cloud_id}/jsm/assets/workspace/{workspace_id}/v1/object/{object_id}"
-    # url = f"{load_settings().require_jira().url}/gateway/api/jsm/assets/workspace/{workspace_id}/v1/object/{object_id}"
-    return jira_request(url)
+    return jira_request(url, settings=settings)
 
 
-def get_workspace_id(workspace_name):
+def get_workspace_id(workspace_name, *, settings=None):
     """Fetch the workspace ID for a given workspace name."""
-    url = f"https://api.atlassian.com/ex/jira/{CLOUD_ID}/jsm/assets/workspace/list"
-    workspaces = jira_request(url).get("values", [])
+    config = settings or load_settings()
+    url = f"https://api.atlassian.com/ex/jira/{config.tenant.cloud_id}/jsm/assets/workspace/list"
+    workspaces = jira_request(url, settings=config).get("values", [])
     for ws in workspaces:
         if ws.get("name", "").lower() == workspace_name.lower():
             return ws.get("id")
     raise ValueError(f"Workspace '{workspace_name}' not found")
 
 
-def get_workspaces():
+def get_workspaces(*, settings=None):
     # https://<Assets Site Name>.atlassian.net/rest/servicedeskapi/assets/workspace
-    url = f"{load_settings().require_jira().url}/rest/servicedeskapi/assets/workspace"
-    # url = f"https://api.atlassian.com/ex/jira/{CLOUD_ID}/jsm/assets/workspace/list"
-    return jira_request(url)
+    config = settings or load_settings()
+    url = f"{config.require_jira().url}/rest/servicedeskapi/assets/workspace"
+    return jira_request(url, settings=config)
 
 
 def fetch_object_schema_list(
-    start_at=0, max_results=50, include_counts=False, workspace_id=WORKSPACE_ID
+    start_at=0,
+    max_results=50,
+    include_counts=False,
+    workspace_id=None,
+    *,
+    settings=None,
 ):
     """Fetch a page of Jira Assets object schemas via the Atlassian Cloud Assets REST API."""
+    config = settings or load_settings()
+    workspace_id = config.tenant.workspace_id if workspace_id is None else workspace_id
     url = (
-        f"https://api.atlassian.com/ex/jira/{CLOUD_ID}/jsm/assets/workspace/"
+        f"https://api.atlassian.com/ex/jira/{config.tenant.cloud_id}/jsm/assets/workspace/"
         f"{workspace_id}/v1/objectschema/list"
     )
     return jira_request(
@@ -87,11 +124,15 @@ def fetch_object_schema_list(
             "includeCounts": str(include_counts).lower(),
         },
         timeout=30,
+        settings=config,
     )
 
 
-def fetch_all_object_schemas(workspace_id, max_results=50, include_counts=False):
+def fetch_all_object_schemas(
+    workspace_id=None, max_results=50, include_counts=False, *, settings=None
+):
     """Fetch all Jira Assets object schemas, paging through the list endpoint."""
+    config = settings or load_settings()
     schemas = []
     start_at = 0
     while True:
@@ -100,6 +141,7 @@ def fetch_all_object_schemas(workspace_id, max_results=50, include_counts=False)
             start_at=start_at,
             max_results=max_results,
             include_counts=include_counts,
+            settings=config,
         )
         values = page.get("values", [])
         schemas.extend(values)
@@ -131,28 +173,7 @@ def get_asset_attribute(asset, attribute_name):
 # Jira query, so a mistake here costs a field we already had rather than one we
 # never fetched. tests/test_assets_and_fetch.py pins this set to what the
 # transformation reads, so adding a field there fails loudly here.
-RETAINED_FIELDS = frozenset(
-    {
-        "summary",
-        "description",
-        "status",
-        "created",
-        "updated",
-        "labels",
-        "priority",
-        "issuetype",
-        "issuelinks",
-        "comment",
-        "customfield_10010",
-        "customfield_10065",
-        "customfield_10673",
-        "customfield_10674",
-        "customfield_10675",
-        "customfield_10679",
-        "customfield_10680",
-        "customfield_10689",
-    }
-)
+RETAINED_FIELDS = frozenset(desks.FIELDS.retained())
 
 
 def trim_issue(issue):
@@ -161,35 +182,44 @@ def trim_issue(issue):
     trimmed["fields"] = {
         name: value
         for name, value in (issue.get("fields") or {}).items()
-        if name in RETAINED_FIELDS
+        if name in desks.FIELDS.retained()
     }
     return trimmed
 
 
 ASSET_FIELDS = (
-    "customfield_10680",
-    "customfield_10679",
-    "customfield_10673",
-    "customfield_10674",
+    desks.FIELDS.main_category,
+    desks.FIELDS.sub_category,
+    desks.FIELDS.central,
+    desks.FIELDS.branch,
 )
 
 
-def enrich_issue_assets(issue, *, category_resolver=None):
+def enrich_issue_assets(issue, *, category_resolver=None, settings=None):
     """Resolve only normal-workspace references; retain explicit optional failures."""
+    config = settings or load_settings()
+    tenant = config.tenant
     result = dict(issue)
     result.pop("customer", None)
     result["customer_country"] = None
     result["asset_labels"] = {}
     result["asset_errors"] = []
-    result["assets_cloud_id"] = CLOUD_ID
-    result["assets_workspace_id"] = WORKSPACE_ID
+    result["assets_cloud_id"] = tenant.cloud_id
+    result["assets_workspace_id"] = tenant.workspace_id
     # Explicit contexts span all projects and the later cache-repair pass.
-    from category_sync import CATEGORY_FIELDS, CategoryResolver
+    from category_sync import CategoryResolver
 
-    category_resolver = category_resolver or CategoryResolver(fetch=fetch_asset_object)
-    category_fields = {item[0] for item in CATEGORY_FIELDS}
+    category_resolver = category_resolver or CategoryResolver(
+        fetch=partial(fetch_asset_object, settings=config), settings=config
+    )
+    category_fields = {item[0] for item in desks.category_fields()}
     result["category_status"] = {}
-    for field in ASSET_FIELDS:
+    for field in (
+        desks.FIELDS.main_category,
+        desks.FIELDS.sub_category,
+        desks.FIELDS.central,
+        desks.FIELDS.branch,
+    ):
         if (
             field in category_fields
             and field in (issue.get("fields") or {})
@@ -199,13 +229,15 @@ def enrich_issue_assets(issue, *, category_resolver=None):
         for ref in issue.get("fields", {}).get(field) or []:
             object_id = str(ref.get("objectId", ""))
             workspace = ref.get("workspaceId")
-            if not object_id or workspace != WORKSPACE_ID:
+            if not object_id or workspace != tenant.workspace_id:
                 result["asset_errors"].append(
                     f"{field}: unresolved workspace reference {object_id}"
                 )
                 continue
             if field in category_fields:
-                resolved = category_resolver.resolve(CLOUD_ID, WORKSPACE_ID, object_id)
+                resolved = category_resolver.resolve(
+                    tenant.cloud_id, tenant.workspace_id, object_id
+                )
                 if resolved.label:
                     result["asset_labels"][object_id] = resolved.label
                     result["category_status"][field] = "resolved"
@@ -216,13 +248,15 @@ def enrich_issue_assets(issue, *, category_resolver=None):
                     )
                 continue
             try:
-                asset = fetch_asset_object(CLOUD_ID, WORKSPACE_ID, object_id)
+                asset = fetch_asset_object(
+                    tenant.cloud_id, tenant.workspace_id, object_id, settings=config
+                )
                 if str(asset.get("id")) != object_id:
                     raise ValueError("Assets returned a different object identity")
                 label = asset.get("label") or asset.get("name")
                 if label:
                     result["asset_labels"][object_id] = label
-                if field == "customfield_10673":
+                if field == desks.FIELDS.central:
                     # Keep the country, discard the Assets object it came from.
                     # That object averaged 24 KB per issue - 63% of the whole
                     # payload - and nothing downstream ever read it, so holding
@@ -295,10 +329,12 @@ def fetch_jira_issues(
     category_resolver: Any = None,
     *,
     invalid_row_cb: Callable[[InvalidIssue], None] | None = None,
+    settings: Settings | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch a complete desk window, reporting invalid dates without raw values."""
+    config = settings or load_settings()
     if isinstance(save_path, _SaveDefault):
-        save_path = load_settings().paths.raw_snapshot
+        save_path = config.paths.raw_snapshot
     if not re.fullmatch(r"[A-Z][A-Z0-9_]*", project):
         raise ValueError("Invalid Jira project key")
     start_dt = effective_start(project, start_dt)
@@ -307,14 +343,14 @@ def fetch_jira_issues(
         return []
     if max_issues < 1:
         raise ValueError("max_issues must be positive")
-    connection = _require_credentials()
+    connection = _require_credentials(config)
     jira = JIRA(
         server=connection.url, basic_auth=(connection.username, connection.password)
     )
     # Confirm authentication and project visibility before accepting an empty search.
     account = jira.myself()
     jira.project(project)
-    account_tz = ZoneInfo(account.get("timeZone") or "Europe/Berlin")
+    account_tz = ZoneInfo(account.get("timeZone") or desks.BERLIN.key)
     clauses = [f"project = {project}"]
     if start_dt:
         clauses.append(f"created >= '{start_dt.astimezone(account_tz):%Y-%m-%d %H:%M}'")
@@ -326,7 +362,9 @@ def fetch_jira_issues(
     if category_resolver is None:
         from category_sync import CategoryResolver
 
-        category_resolver = CategoryResolver(fetch=fetch_asset_object)
+        category_resolver = CategoryResolver(
+            fetch=partial(fetch_asset_object, settings=config), settings=config
+        )
     all_issues = []
     next_token = None
     seen_tokens = set()
@@ -341,14 +379,16 @@ def fetch_jira_issues(
             maxResults=min(100, max_issues - fetched),
             nextPageToken=next_token,
             json_result=True,
-            expand="*all,customfield_10673,customfield_10674",
+            expand=f"*all,{desks.FIELDS.central},{desks.FIELDS.branch}",
         )
         if page.get("errorMessages") or "issues" not in page:
             raise RuntimeError(f"Jira returned an invalid result for {project}")
         batch = page["issues"]
         fetched += len(batch)
         kept = [
-            enrich_issue_assets(trim_issue(issue), category_resolver=category_resolver)
+            enrich_issue_assets(
+                trim_issue(issue), category_resolver=category_resolver, settings=config
+            )
             for issue in filter_issue_window(
                 project, batch, start_dt, end_dt, invalid_row_cb=invalid_row_cb
             )

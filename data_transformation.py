@@ -10,16 +10,16 @@ import pandas as pd
 from jira import JIRA
 
 import reporting_policy as reporting
+import service_desks as desks
 from asset_country import attach_country, load_cache
 from issue_links import clone_links, parse_issue_links
-from jira_loader import WORKSPACE_ID
 from resolution_bands import classify_bands
-from settings import load_settings
+from settings import DEFAULT_TENANT, TENANT_ATTR, Settings, load_settings
 
 
-def get_jira() -> JIRA:
+def get_jira(settings: Settings | None = None) -> JIRA:
     """Create a Jira client from the current requested-operation settings."""
-    connection = load_settings().require_jira()
+    connection = (settings or load_settings()).require_jira()
     return JIRA(
         server=connection.url, basic_auth=(connection.username, connection.password)
     )
@@ -29,14 +29,14 @@ def get_jira() -> JIRA:
 # with open('data/jira-servicedesk-schema-objects.json', 'r') as f:
 #    schema = json.load(f)
 # object_id_to_name = {v['id']: v['name'] for v in schema['values']}
-BUS_START = time(8, 0)
-BUS_END = time(18, 0)
-TZ = "Europe/Berlin"
+BUS_START = reporting.BUSINESS_START
+BUS_END = reporting.BUSINESS_END
+TZ = reporting.BERLIN.key
 
 
 def enrich_jira_time_metrics(
     df: pd.DataFrame,
-    tz: str = "Europe/Berlin",
+    tz: str = reporting.BERLIN.key,
     done_value: str = reporting.LEGACY_DONE,
     status_col: str = "currentstatus_name",
     created_col: str = "created",
@@ -250,11 +250,11 @@ with load_settings().paths.category_map.open() as f:
     object_id_to_name = json.load(f)
 
 
-def load_clone_of_clone(key):
+def load_clone_of_clone(key, *, settings=None):
     clones = []
     clone_types = []
     try:
-        issue_raw = get_jira().issue(key).raw
+        issue_raw = get_jira(settings).issue(key).raw
         links = issue_raw["fields"].get("issuelinks", [])
         for link in links:
             if "outwardIssue" in link:
@@ -267,7 +267,7 @@ def load_clone_of_clone(key):
     return ",".join(clones), ",".join(clone_types)
 
 
-def load_clones(links):
+def load_clones(links, *, settings=None):
     clones = []
     clone_types = []
     clones_of_clones = []
@@ -279,7 +279,7 @@ def load_clones(links):
                 clone_type = link["type"]["name"]
                 clones.append(clone_key)
                 clone_types.append(clone_type)
-                cc, ctc = load_clone_of_clone(clone_key)
+                cc, ctc = load_clone_of_clone(clone_key, settings=settings)
                 clones_of_clones.append(cc)
                 clone_types_of_clones.append(ctc)
     except Exception as e:  # noqa: BLE001 - preserve optional link traversal
@@ -350,7 +350,7 @@ def _asset_id(fields, field_name):
     return "" if value is None else str(value)
 
 
-def _escalation_asset_id(fields, field_name):
+def _escalation_asset_id(fields, field_name, *, settings=None):
     """objectId of a country-escalation field, but only from the normal workspace.
 
     Country resolution keys its cache by objectId alone, so an objectId minted
@@ -367,19 +367,23 @@ def _escalation_asset_id(fields, field_name):
     values = fields.get(field_name) or []
     if not isinstance(values, list) or not values or not isinstance(values[0], dict):
         return ""
+    tenant = (settings or load_settings()).tenant
     workspace = values[0].get("workspaceId")
-    if workspace is not None and workspace != WORKSPACE_ID:
+    if workspace is None and tenant != DEFAULT_TENANT:
+        return ""
+    if workspace is not None and workspace != tenant.workspace_id:
         return ""
     return _asset_id(fields, field_name)
 
 
-def _escalation_cell(fields, field_name):
+def _escalation_cell(fields, field_name, *, settings=None):
     """The stored 'ID_<objectId>' cell for an escalation field, or ''."""
-    object_id = _escalation_asset_id(fields, field_name)
+    object_id = _escalation_asset_id(fields, field_name, settings=settings)
     return f"ID_{object_id}" if object_id else ""
 
 
-def _asset_label(issue, field_name):
+def _asset_label(issue, field_name, *, settings=None):
+    config = settings or load_settings()
     if (issue.get("category_status") or {}).get(field_name) == "unassigned":
         return "Nicht zugeordnet"
     fields = issue.get("fields") or {}
@@ -390,24 +394,34 @@ def _asset_label(issue, field_name):
     )
     if normal_marker and object_id:
         reference = fields[field_name][0]
-        if reference.get("workspaceId") != WORKSPACE_ID:
+        if (
+            issue.get("assets_cloud_id", config.tenant.cloud_id)
+            != config.tenant.cloud_id
+            or issue.get("assets_workspace_id", config.tenant.workspace_id)
+            != config.tenant.workspace_id
+        ):
+            return "Unbekannt"
+        if reference.get("workspaceId") != config.tenant.workspace_id:
             return "Unbekannt"
     labels = issue.get("asset_labels") or {}
     if object_id and str(object_id) in labels and labels[str(object_id)]:
         return str(labels[str(object_id)])
     if normal_marker:
         return "Unbekannt"
+    if config.tenant != DEFAULT_TENANT:
+        return "Unbekannt"
     return object_id_to_name.get(str(object_id), "Unbekannt")
 
 
-def _extract_issue(issue, comment_separator):
+def _extract_issue(issue, comment_separator, *, settings=None):
+    config = settings or load_settings()
     fields = issue.get("fields") or {}
     links = fields.get("issuelinks") or []
     normalized = parse_issue_links(links)
     clones_only = clone_links(normalized)
     if links:
         clones, clone_types, n_clones, clones_of_clones, clone_types_of_clones = (
-            load_clones(links)
+            load_clones(links, settings=config)
         )
     else:
         clones = clone_types = clones_of_clones = clone_types_of_clones = ""
@@ -419,8 +433,8 @@ def _extract_issue(issue, comment_separator):
         for comment in comments
         if isinstance(comment, dict)
     )
-    main_id = _asset_id(fields, "customfield_10680")
-    sub_id = _asset_id(fields, "customfield_10679")
+    main_id = _asset_id(fields, desks.FIELDS.main_category)
+    sub_id = _asset_id(fields, desks.FIELDS.sub_category)
     cloned_by = _nested(links[0], "inwardIssue", "key") if links else ""
 
     return {
@@ -433,20 +447,20 @@ def _extract_issue(issue, comment_separator):
         "created": fields.get("created") or "",
         "updated": fields.get("updated") or "",
         "labels": fields.get("labels") or [],
-        "source": _nested(fields, "customfield_10675", "value"),
+        "source": _nested(fields, desks.FIELDS.source, "value"),
         "priority": _nested(fields, "priority", "name"),
-        "category": fields.get("customfield_10065") or [],
+        "category": fields.get(desks.FIELDS.categories) or [],
         "issuetype": _nested(fields, "issuetype", "name"),
         "main_category_id": main_id,
         "sub_category_id": sub_id,
         "currentstatus_name": _nested(
-            fields, "customfield_10010", "currentStatus", "status"
+            fields, desks.FIELDS.request, "currentStatus", "status"
         ),
         "currentstatus_date": _nested(
-            fields, "customfield_10010", "currentStatus", "statusDate", "jira"
+            fields, desks.FIELDS.request, "currentStatus", "statusDate", "jira"
         ),
         "comments": comment_text,
-        "request_type": _nested(fields, "customfield_10010", "requestType", "name"),
+        "request_type": _nested(fields, desks.FIELDS.request, "requestType", "name"),
         "clones": clones,
         "clone_types": clone_types,
         "cloned_by": cloned_by,
@@ -459,14 +473,20 @@ def _extract_issue(issue, comment_separator):
         "clone_outward_keys": [
             link.target_key for link in clones_only if link.direction == "outward"
         ],
-        "ansprechpartner": _escalation_cell(fields, "customfield_10689"),
-        "zentrale": _escalation_cell(fields, "customfield_10673"),
-        "filiale": _escalation_cell(fields, "customfield_10674"),
-        "Link": _nested(fields, "customfield_10010", "_links", "agent"),
+        "ansprechpartner": _escalation_cell(
+            fields, desks.FIELDS.contact, settings=config
+        ),
+        "zentrale": _escalation_cell(fields, desks.FIELDS.central, settings=config),
+        "filiale": _escalation_cell(fields, desks.FIELDS.branch, settings=config),
+        "Link": _nested(fields, desks.FIELDS.request, "_links", "agent"),
         "clones_of_clones": clones_of_clones,
         "clone_types_of_clones": clone_types_of_clones,
-        "Hauptkategorie": _asset_label(issue, "customfield_10680"),
-        "Unterkategorie": _asset_label(issue, "customfield_10679"),
+        "Hauptkategorie": _asset_label(
+            issue, desks.FIELDS.main_category, settings=config
+        ),
+        "Unterkategorie": _asset_label(
+            issue, desks.FIELDS.sub_category, settings=config
+        ),
     }
 
 
@@ -478,8 +498,13 @@ def _load_service_desk_issues(
     clone_of_clone_project=None,
     comment_separator="\n--------------------------------\n",
     country_cache=None,
+    settings=None,
 ):
-    rows = [_extract_issue(issue, comment_separator) for issue in (issues or [])]
+    config = settings or load_settings()
+    rows = [
+        _extract_issue(issue, comment_separator, settings=config)
+        for issue in (issues or [])
+    ]
     df = pd.DataFrame(
         rows, columns=[*_ISSUE_COLUMNS, "Hauptkategorie", "Unterkategorie"]
     )
@@ -488,7 +513,7 @@ def _load_service_desk_issues(
             df[column], errors="coerce", utc=True, format="mixed"
         ).dt.tz_convert(TZ)
 
-    df = enrich_jira_time_metrics(df, subdiv="BW")
+    df = enrich_jira_time_metrics(df, subdiv=reporting.HOLIDAY_SUBDIV)
     df["ansprechpartner"] = df["ansprechpartner"].astype(str)
     df["zentrale"] = df["zentrale"].astype(str)
     df["filiale"] = df["filiale"].astype(str)
@@ -497,7 +522,11 @@ def _load_service_desk_issues(
     # a pure cache lookup - no Assets API call, no credentials. Ids the cache
     # has not seen become NOT_RESOLVED rather than silently claiming the asset
     # carries no country; backfill_country.py resolves them.
-    df = attach_country(df, load_cache() if country_cache is None else country_cache)
+    if country_cache is None:
+        country_cache = (
+            load_cache(settings=config) if config.tenant == DEFAULT_TENANT else {}
+        )
+    df = attach_country(df, country_cache)
     df["firma"] = firma
     df["clone_in_project"] = df["clones"].apply(
         lambda value: (
@@ -516,6 +545,7 @@ def _load_service_desk_issues(
     )
     for column in ("has_exax_clone", "has_axt_clone_clone"):
         df[column] = df[column].fillna(False).astype(bool)
+    df.attrs[TENANT_ATTR] = config.tenant.as_dict()
     return df[["firma", *[column for column in df.columns if column != "firma"]]]
 
 
@@ -523,14 +553,11 @@ def load_issues(
     issues: list[dict[str, Any]] | None,
     *,
     country_cache: Mapping[str, str | None] | None = None,
+    settings: Settings | None = None,
 ) -> pd.DataFrame:
-    """Transform this desk using supplied country evidence when available."""
-    return _load_service_desk_issues(
-        issues,
-        firma="IPRO",
-        country_cache=country_cache,
-        clone_project="EXIPR",
-        comment_separator="\n\n",
+    """Transform IPRO tickets using their registered desk policy."""
+    return load_project_issues(
+        "SDIPR", issues, country_cache=country_cache, settings=settings
     )
 
 
@@ -538,14 +565,11 @@ def load_issues_Amparex(
     issues: list[dict[str, Any]] | None,
     *,
     country_cache: Mapping[str, str | None] | None = None,
+    settings: Settings | None = None,
 ) -> pd.DataFrame:
-    """Transform this desk using supplied country evidence when available."""
-    return _load_service_desk_issues(
-        issues,
-        firma="Amparex",
-        country_cache=country_cache,
-        clone_project="EXAX",
-        clone_of_clone_project="AX",
+    """Transform Amparex tickets using their registered desk policy."""
+    return load_project_issues(
+        "SDAX", issues, country_cache=country_cache, settings=settings
     )
 
 
@@ -553,10 +577,11 @@ def load_issues_Euronet(
     issues: list[dict[str, Any]] | None,
     *,
     country_cache: Mapping[str, str | None] | None = None,
+    settings: Settings | None = None,
 ) -> pd.DataFrame:
-    """Transform this desk using supplied country evidence when available."""
-    return _load_service_desk_issues(
-        issues, firma="Euronet", country_cache=country_cache
+    """Transform Euronet tickets using their registered desk policy."""
+    return load_project_issues(
+        "SDEU", issues, country_cache=country_cache, settings=settings
     )
 
 
@@ -565,19 +590,22 @@ def load_project_issues(
     issues: list[dict[str, Any]] | None,
     *,
     country_cache: Mapping[str, str | None] | None = None,
+    settings: Settings | None = None,
 ) -> pd.DataFrame:
-    """Dispatch desk transformation with explicitly captured country evidence."""
-    project_key = str(project).upper()
-    loaders = {
-        "SDIPR": load_issues,
-        "SDAX": load_issues_Amparex,
-        "SDEU": load_issues_Euronet,
-    }
+    """Apply the registry's transformation and escalation policy for one desk."""
     try:
-        loader = loaders[project_key]
+        desk = desks.BY_KEY[str(project).upper()]
     except KeyError as exc:
         raise ValueError(f"Unsupported Jira project: {project}") from exc
-    return loader(issues, country_cache=country_cache)
+    return _load_service_desk_issues(
+        issues,
+        firma=desk.company,
+        clone_project=desk.clone_project,
+        clone_of_clone_project=desk.clone_of_clone_project,
+        comment_separator=desk.comment_separator,
+        country_cache=country_cache,
+        settings=settings,
+    )
 
 
 def _normalize_bool_columns(df):

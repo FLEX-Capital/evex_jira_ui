@@ -152,7 +152,7 @@ def test_same_identity_keeps_valid_label_on_failure_but_changed_id_cannot_inheri
     old = load_project_issues("SDAX", [raw()])
     data_loading.save_data(old)
 
-    def denied(*a):
+    def denied(*a, **kwargs):
         raise PermissionError("denied")
 
     monkeypatch.setattr(jira_loader, "fetch_asset_object_uncached", denied)
@@ -257,7 +257,7 @@ def test_source_repair_cannot_replace_a_concurrent_source_update(storage, monkey
     monkeypatch.setattr(
         source_sync,
         "refresh_missing_sources",
-        lambda df: original(df, fetch_sources=read_sources),
+        lambda df, **kwargs: original(df, fetch_sources=read_sources),
     )
     report = desk_sync.run_sync(request(projects=["SDAX"], repair_sources=True))
     assert pd.read_pickle(storage).loc[0, "source"] == "Telefon"

@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 
-from settings import load_settings
+from settings import DEFAULT_TENANT, SettingsError, load_settings
 
 CACHE_PATH = "data/asset_country.json"
 
@@ -49,16 +49,19 @@ def normalise_object_id(value):
     return text
 
 
-def load_cache(path=None):
+def load_cache(path=None, *, settings=None):
     """Return {object_id: country_or_None}; {} when the file is absent."""
-    path = load_settings().paths.countries if path is None else path
+    config = settings or load_settings()
+    if config.tenant != DEFAULT_TENANT:
+        return {}
+    path = config.paths.countries if path is None else path
     if not os.path.exists(path):
         return {}
     with open(path, encoding="utf-8") as handle:
         return json.load(handle)
 
 
-def save_cache(cache, path=None, *, baseline=None):
+def save_cache(cache, path=None, *, baseline=None, settings=None):
     """Merge a job's changes under a shared lock, then atomically replace.
 
     A baseline lets retries remove old nulls without erasing another job's
@@ -66,9 +69,14 @@ def save_cache(cache, path=None, *, baseline=None):
     """
     from data_loading import cache_lock
 
-    path = load_settings().paths.countries if path is None else path
+    config = settings or load_settings()
+    if config.tenant != DEFAULT_TENANT:
+        raise SettingsError(
+            "country_tenant_schema_required", ("JIRA_CLOUD_ID", "JIRA_WORKSPACE_ID")
+        )
+    path = config.paths.countries if path is None else path
     with cache_lock(path):
-        current = load_cache(path)
+        current = load_cache(path, settings=config)
         if baseline is None:
             current.update(cache)
         else:

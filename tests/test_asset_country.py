@@ -130,7 +130,7 @@ def test_default_resolver_reports_failure_by_raising(monkeypatch):
     """
     import jira_country_export
 
-    def boom(object_id, cloud_id=None, workspace_id=None):
+    def boom(object_id, cloud_id=None, workspace_id=None, **kwargs):
         raise RuntimeError("403")
 
     monkeypatch.setattr(jira_country_export, "_fetch_asset_with_retry", boom)
@@ -148,7 +148,9 @@ def test_default_resolver_still_caches_a_genuine_absence(monkeypatch):
     monkeypatch.setattr(
         jira_country_export,
         "_fetch_asset_with_retry",
-        lambda object_id, cloud_id=None, workspace_id=None: {"attributes": []},
+        lambda object_id, cloud_id=None, workspace_id=None, **kwargs: {
+            "attributes": []
+        },
     )
 
     cache, resolved, failed = resolve_missing(["ID_8"], {})

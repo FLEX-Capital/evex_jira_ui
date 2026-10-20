@@ -167,7 +167,7 @@ def test_cli_and_both_ui_controls_produce_identical_schema_after_category_retry(
         monkeypatch.setenv("DATA_DIR", str(path.parent))
         attempts = {}
 
-        def fetch(cloud, workspace, oid, _attempts=attempts):
+        def fetch(cloud, workspace, oid, _attempts=attempts, **kwargs):
             _attempts[oid] = _attempts.get(oid, 0) + 1
             if oid == "main-1" and _attempts[oid] == 1:
                 raise requests.Timeout("transient")
@@ -177,7 +177,7 @@ def test_cli_and_both_ui_controls_produce_identical_schema_after_category_retry(
         monkeypatch.setattr(
             desk_sync,
             "CategoryResolver",
-            lambda: actual_resolver(sleep=lambda seconds: None),
+            lambda **kwargs: actual_resolver(sleep=lambda seconds: None, **kwargs),
         )
         jobs = sync_jobs.SyncJobs()
         monkeypatch.setattr(sync_jobs, "JOB", jobs)
