@@ -11,7 +11,7 @@ from jira import JIRA
 
 import reporting_policy as reporting
 import service_desks as desks
-from asset_country import attach_country, load_cache
+from asset_country import attach_country, issue_asset_references, load_cache
 from issue_links import clone_links, parse_issue_links
 from resolution_bands import classify_bands
 from settings import DEFAULT_TENANT, TENANT_ATTR, Settings, load_settings
@@ -322,6 +322,7 @@ _ISSUE_COLUMNS = [
     "clone_count",
     "clone_inward_keys",
     "clone_outward_keys",
+    "asset_references",
     "ansprechpartner",
     "zentrale",
     "filiale",
@@ -348,38 +349,6 @@ def _asset_id(fields, field_name):
         return ""
     value = values[0].get("objectId")
     return "" if value is None else str(value)
-
-
-def _escalation_asset_id(fields, field_name, *, settings=None):
-    """objectId of a country-escalation field, but only from the normal workspace.
-
-    Country resolution keys its cache by objectId alone, so an objectId minted
-    in another Assets workspace would collide with a normal-workspace entry and
-    hand the ticket an unrelated site's country - and because Ansprechpartner
-    outranks Filiale, a foreign id can override a country that was correct.
-    jira_country_export._object_id_for_field() rejects the same references; this
-    keeps the dashboard path consistent with it.
-
-    A reference without a workspaceId at all is legacy raw data, not a
-    cross-workspace reference, so it is accepted - the same rule _asset_label()
-    applies to inputs that predate workspace tagging.
-    """
-    values = fields.get(field_name) or []
-    if not isinstance(values, list) or not values or not isinstance(values[0], dict):
-        return ""
-    tenant = (settings or load_settings()).tenant
-    workspace = values[0].get("workspaceId")
-    if workspace is None and tenant != DEFAULT_TENANT:
-        return ""
-    if workspace is not None and workspace != tenant.workspace_id:
-        return ""
-    return _asset_id(fields, field_name)
-
-
-def _escalation_cell(fields, field_name, *, settings=None):
-    """The stored 'ID_<objectId>' cell for an escalation field, or ''."""
-    object_id = _escalation_asset_id(fields, field_name, settings=settings)
-    return f"ID_{object_id}" if object_id else ""
 
 
 def _asset_label(issue, field_name, *, settings=None):
@@ -413,6 +382,13 @@ def _asset_label(issue, field_name, *, settings=None):
 def _extract_issue(issue, comment_separator, *, settings=None):
     config = settings or load_settings()
     fields = issue.get("fields") or {}
+    asset_references = issue_asset_references(issue, tenant=config.tenant)
+    escalation_cells = {
+        reference["source"]: f"ID_{reference['object_id']}"
+        for reference in asset_references
+        if reference["provenance"] != "rejected"
+    }
+
     links = fields.get("issuelinks") or []
     normalized = parse_issue_links(links)
     clones_only = clone_links(normalized)
@@ -470,11 +446,10 @@ def _extract_issue(issue, comment_separator, *, settings=None):
         "clone_outward_keys": [
             link.target_key for link in clones_only if link.direction == "outward"
         ],
-        "ansprechpartner": _escalation_cell(
-            fields, desks.FIELDS.contact, settings=config
-        ),
-        "zentrale": _escalation_cell(fields, desks.FIELDS.central, settings=config),
-        "filiale": _escalation_cell(fields, desks.FIELDS.branch, settings=config),
+        "asset_references": asset_references,
+        "ansprechpartner": escalation_cells.get("ansprechpartner", ""),
+        "zentrale": escalation_cells.get("zentrale", ""),
+        "filiale": escalation_cells.get("filiale", ""),
         "Link": _nested(fields, desks.FIELDS.request, "_links", "agent"),
         "clones_of_clones": clones_of_clones,
         "clone_types_of_clones": clone_types_of_clones,

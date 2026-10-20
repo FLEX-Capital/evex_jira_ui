@@ -23,7 +23,17 @@ class CountryExportTests(unittest.TestCase):
             },
         ]
         with patch.object(
-            exporter, "resolve_asset_country", return_value="DE"
+            exporter,
+            "_fetch_asset_with_retry",
+            return_value={
+                "id": "2",
+                "attributes": [
+                    {
+                        "objectTypeAttribute": {"name": "Land"},
+                        "objectAttributeValues": [{"displayValue": "DE"}],
+                    }
+                ],
+            },
         ) as resolve:
             result = exporter.resolve_countries(issues)
         self.assertEqual(result, {"SDEU-1": None, "SDAX-2": "DE"})

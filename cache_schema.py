@@ -17,6 +17,7 @@ _LISTS = (
     "issue_links",
     "clone_inward_keys",
     "clone_outward_keys",
+    "asset_references",
 )
 _COUNTS = ("clone_count", "n_clones")
 
@@ -47,6 +48,21 @@ def _valid_list(column: str, value: object) -> bool:
         return True
     if not isinstance(value, list):
         return False
+    if column == "asset_references":
+        return all(
+            isinstance(reference, dict)
+            and reference.get("source") in ("ansprechpartner", "filiale", "zentrale")
+            and reference.get("provenance")
+            in ("modern", "legacy_unverified", "rejected")
+            and (
+                reference["provenance"] != "modern"
+                or all(
+                    isinstance(reference.get(key), str) and reference[key]
+                    for key in ("cloud_id", "workspace_id", "object_id")
+                )
+            )
+            for reference in value
+        )
     if column == "issue_links":
         return all(
             isinstance(link, dict)
@@ -160,6 +176,8 @@ def normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
         raise CacheSchemaError("invalid_key", ("key",))
     result = frame.copy(deep=True)
     if version == CURRENT_TICKET_SCHEMA:
+        if "asset_references" not in result:
+            result["asset_references"] = pd.Series(index=result.index, dtype="object")
         _validate(result)
         for column in _DATES:
             result[column] = result[column].dt.tz_convert(BERLIN.key)

@@ -128,14 +128,14 @@ def test_default_resolver_reports_failure_by_raising(monkeypatch):
     resolve_asset_country() swallows fetch errors and returns None, which
     resolve_missing() would cache as a real "no Land" answer and never retry.
     """
-    import jira_country_export
+    import asset_country
 
-    def boom(object_id, cloud_id=None, workspace_id=None, **kwargs):
-        raise RuntimeError("403")
+    def boom(identity, **kwargs):
+        raise PermissionError("403")
 
-    monkeypatch.setattr(jira_country_export, "_fetch_asset_with_retry", boom)
+    monkeypatch.setattr(asset_country, "fetch_country_asset", boom)
 
-    # No resolver= argument: this exercises the lazy default import.
+    # No resolver= argument: this exercises the shared core's default fetch.
     cache, resolved, failed = resolve_missing(["ID_7"], {})
     assert "7" not in cache
     assert (resolved, failed) == (0, 1)
@@ -143,14 +143,12 @@ def test_default_resolver_reports_failure_by_raising(monkeypatch):
 
 def test_default_resolver_still_caches_a_genuine_absence(monkeypatch):
     """An asset that fetches fine but has no Land is cached as None."""
-    import jira_country_export
+    import asset_country
 
     monkeypatch.setattr(
-        jira_country_export,
-        "_fetch_asset_with_retry",
-        lambda object_id, cloud_id=None, workspace_id=None, **kwargs: {
-            "attributes": []
-        },
+        asset_country,
+        "fetch_country_asset",
+        lambda identity, **kwargs: {"id": identity.object_id, "attributes": []},
     )
 
     cache, resolved, failed = resolve_missing(["ID_8"], {})

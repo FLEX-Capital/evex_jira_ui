@@ -89,8 +89,8 @@ class CountryRefreshUITests(unittest.TestCase):
             patch("asset_country.load_cache", return_value={}),
             patch("asset_country.save_cache", side_effect=lambda cache, **kw: cache),
             patch(
-                "jira_country_export.resolve_asset_country_strict",
-                lambda object_id: "Österreich",
+                "asset_country.resolve_asset_country_strict",
+                lambda object_id, **kwargs: "Österreich",
             ),
             patch("interactive.render_interactive"),
         ):

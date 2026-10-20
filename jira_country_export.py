@@ -25,21 +25,18 @@ Usage:
 import argparse
 import json
 import os
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from functools import cache, partial
+from functools import partial
 from typing import Any
 
 import pandas as pd
-import requests
 
+import asset_country as country_policy
 import service_desks as desks
-from jira_loader import (
-    fetch_asset_object,
-    fetch_jira_issues,
-    get_asset_attribute,
-)
+from country_cache import AssetIdentity
+from http_policy import COUNTRY
+from jira_loader import fetch_asset_object, fetch_jira_issues
 from reporting_policy import BERLIN
 from settings import DEFAULT_CLOUD_ID, DEFAULT_WORKSPACE_ID, Settings, load_settings
 
@@ -52,17 +49,12 @@ FILIALE_FIELD = desks.FIELDS.branch
 ZENTRALE_FIELD = desks.FIELDS.central
 ESCALATION_FIELDS = [ANSPRECHPARTNER_FIELD, FILIALE_FIELD, ZENTRALE_FIELD]
 
-# Attribute names on an asset that hold the country.
-COUNTRY_ATTRIBUTES = ["Land", "Country"]
-
+# Compatibility exports derive from the shared policy.
+COUNTRY_ATTRIBUTES = country_policy.COUNTRY_ATTRIBUTES
 DEFAULT_INPUT = "data/jira_issues.json"
 DEFAULT_OUTPUT = "data/issue_country.xlsx"
-
-# Retry policy for the Assets API. It rate-limits aggressively (HTTP 429),
-# so transient throttling is retried with exponential backoff; genuine
-# 404/403 (deleted/forbidden objects) are permanent and not retried.
-MAX_RETRIES = 6
-BACKOFF_BASE = 2.0  # seconds: 2, 4, 8, 16, 32, 64
+MAX_RETRIES = COUNTRY.attempts
+BACKOFF_BASE = COUNTRY.fallback_delays[0]
 
 
 def _fetch_asset_with_retry(
@@ -72,72 +64,21 @@ def _fetch_asset_with_retry(
     *,
     settings: Settings | None = None,
 ) -> dict[str, Any]:
-    """Fetch an asset, retrying transient 429/5xx responses with backoff."""
     config = settings or load_settings()
-    cloud_id = config.tenant.cloud_id if cloud_id is None else cloud_id
-    workspace_id = config.tenant.workspace_id if workspace_id is None else workspace_id
-    for attempt in range(MAX_RETRIES):
-        try:
-            asset = fetch_asset_object(
-                cloud_id, workspace_id, object_id, settings=config
-            )
-            if str(asset.get("id")) != str(object_id):
-                raise ValueError("Assets returned a different object identity")
-            return asset
-        except requests.HTTPError as exc:
-            status = exc.response.status_code if exc.response is not None else None
-            if status in (429, 500, 502, 503, 504) and attempt < MAX_RETRIES - 1:
-                retry_after = (
-                    exc.response.headers.get("Retry-After") if exc.response else None
-                )
-                delay = (
-                    float(retry_after) if retry_after else BACKOFF_BASE * (2**attempt)
-                )
-                time.sleep(delay)
-                continue
-            raise  # permanent (404/403/...) or retries exhausted
-    raise RuntimeError("Assets retry policy exhausted")
-
-
-def resolve_asset_country(
-    object_id: str,
-    cloud_id: str | None = None,
-    workspace_id: str | None = None,
-    *,
-    settings: Settings | None = None,
-) -> str | None:
-    """Resolve an optional country under the full current tenant identity."""
-    config = settings or load_settings()
-    return _resolve_asset_country_cached(
-        object_id,
-        config.tenant.cloud_id if cloud_id is None else cloud_id,
-        config.tenant.workspace_id if workspace_id is None else workspace_id,
-        config,
+    identity = AssetIdentity(
+        cloud_id or config.tenant.cloud_id,
+        workspace_id or config.tenant.workspace_id,
+        str(object_id),
     )
 
-
-@cache
-def _resolve_asset_country_cached(
-    object_id: str, cloud_id: str, workspace_id: str, settings: Settings
-) -> str | None:
-    """Return the country ("Land"/"Country") of a single asset, or None.
-
-    Cached by full tenant and settings so shared assets are fetched once.
-    """
-    try:
-        asset = _fetch_asset_with_retry(
-            object_id, cloud_id, workspace_id, settings=settings
+    def fetch(value: AssetIdentity) -> dict[str, Any]:
+        return fetch_asset_object(
+            value.cloud_id, value.workspace_id, value.object_id, settings=config
         )
-    except (
-        Exception
-    ) as exc:  # noqa: BLE001 - report optional/isolated failures  # permanent error -> country unknown
-        print(f"  ! failed to fetch asset {object_id}: {exc}")
-        return None
-    for attr in COUNTRY_ATTRIBUTES:
-        value = get_asset_attribute(asset, attr)
-        if value:
-            return value
-    return None
+
+    return dict(
+        country_policy.fetch_country_asset(identity, fetch=fetch, settings=config)
+    )
 
 
 def resolve_asset_country_strict(
@@ -147,52 +88,81 @@ def resolve_asset_country_strict(
     *,
     settings: Settings | None = None,
 ) -> str | None:
-    """Like resolve_asset_country, but a failed fetch raises instead of None.
-
-    resolve_asset_country collapses "the fetch failed" and "the asset carries
-    no Land" into the same None. Callers that cache the answer -
-    asset_country.resolve_missing() - would otherwise persist a transient
-    failure as a real result and never retry that id, so they need the two
-    cases kept apart.
-    """
-    asset = _fetch_asset_with_retry(
-        object_id, cloud_id, workspace_id, settings=settings
+    """Compatibility adapter retaining failures instead of returning false no-country."""
+    config = settings or load_settings()
+    identity = AssetIdentity(
+        cloud_id or config.tenant.cloud_id,
+        workspace_id or config.tenant.workspace_id,
+        str(object_id),
     )
-    for attr in COUNTRY_ATTRIBUTES:
-        value = get_asset_attribute(asset, attr)
-        if value:
-            return value
-    return None
+    lookup = _country_lookup(identity, config)
+    if lookup.outcome == "failed":
+        raise country_policy.CountryResolutionError(lookup.error_code or "unexpected")
+    return lookup.country
+
+
+def resolve_asset_country(
+    object_id: str,
+    cloud_id: str | None = None,
+    workspace_id: str | None = None,
+    *,
+    settings: Settings | None = None,
+) -> str | None:
+    """Compatibility optional-country result; failures are never memoized."""
+    try:
+        return resolve_asset_country_strict(
+            object_id, cloud_id, workspace_id, settings=settings
+        )
+    except country_policy.CountryResolutionError:
+        return None
+
+
+def _country_lookup(
+    identity: AssetIdentity, config: Settings
+) -> country_policy.CountryLookup:
+    return country_policy.resolve_country(
+        identity,
+        fetch=lambda value: _fetch_asset_with_retry(
+            value.object_id, value.cloud_id, value.workspace_id, settings=config
+        ),
+    )
 
 
 def _object_id_for_field(
     issue_fields: dict[str, Any], field: str, *, settings: Settings | None = None
 ) -> str | None:
-    """Return the (last) asset objectId referenced by a custom field, or None."""
-    refs = issue_fields.get(field) or []
-    if not refs:
-        return None
-    ref = refs[-1]
-    if ref.get("workspaceId") != (settings or load_settings()).tenant.workspace_id:
-        print(f"Unresolved asset: unexpected workspace in {field}; no sandbox fallback")
-        return None
-    return ref.get("objectId")
+    identity = country_policy.parse_asset_reference(
+        issue_fields.get(field), tenant=(settings or load_settings()).tenant
+    )
+    return identity.object_id if identity else None
 
 
 def country_for_issue(
-    issue: dict[str, Any], *, settings: Settings | None = None
+    issue: dict[str, Any],
+    *,
+    settings: Settings | None = None,
+    outcomes: dict[AssetIdentity, country_policy.CountryLookup] | None = None,
 ) -> str | None:
-    """Resolve an issue's country via Ansprechpartner -> Filiale -> Zentrale."""
+    """Resolve via the shared first-reference escalation and outcome policy."""
     config = settings or load_settings()
-    fields = issue.get("fields", {})
-    for field in (desks.FIELDS.contact, desks.FIELDS.branch, desks.FIELDS.central):
-        object_id = _object_id_for_field(fields, field, settings=config)
-        if not object_id:
-            continue
-        country = resolve_asset_country(object_id, settings=config)
-        if country:
-            return country
-    return None
+    references = country_policy.country_references(issue, tenant=config.tenant)
+    if outcomes is None:
+        outcomes = {
+            identity: _country_lookup(identity, config)
+            for _, identity in references
+            if identity is not None
+        }
+    selection = country_policy.select_country(references, outcomes)
+    return (
+        selection.country
+        if selection.country
+        not in (
+            country_policy.NOT_RESOLVED,
+            country_policy.NO_COUNTRY_ON_ASSET,
+            country_policy.NO_ASSETS_LINKED,
+        )
+        else None
+    )
 
 
 def load_issues(
@@ -232,28 +202,31 @@ def load_issues(
 
 def prefetch_asset_countries(
     issues: list[dict[str, Any]], workers: int = 4, *, settings: Settings | None = None
-) -> None:
+) -> dict[AssetIdentity, country_policy.CountryLookup]:
     """Warm the resolver cache by fetching every unique asset concurrently.
 
     The full ticket set references only a couple of thousand distinct assets,
     so resolving them in parallel turns a ~15 minute serial run into ~1 minute.
     """
     config = settings or load_settings()
-    unique_ids: set[str] = set()
-    for issue in issues:
-        fields = issue.get("fields", {})
-        for field in (desks.FIELDS.contact, desks.FIELDS.branch, desks.FIELDS.central):
-            oid = _object_id_for_field(fields, field, settings=config)
-            if oid:
-                unique_ids.add(oid)
-    object_ids = sorted(unique_ids)
-    print(f"Pre-fetching {len(object_ids)} unique assets with {workers} workers...")
-    done = 0
+    identities = sorted(
+        {
+            identity
+            for issue in issues
+            for _, identity in country_policy.country_references(
+                issue, tenant=config.tenant
+            )
+            if identity is not None
+        },
+        key=lambda identity: (
+            identity.cloud_id,
+            identity.workspace_id,
+            identity.object_id,
+        ),
+    )
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        for _ in pool.map(partial(resolve_asset_country, settings=config), object_ids):
-            done += 1
-            if done % 250 == 0 or done == len(object_ids):
-                print(f"  fetched {done}/{len(object_ids)} assets")
+        lookups = pool.map(partial(_country_lookup, config=config), identities)
+        return dict(zip(identities, lookups, strict=True))
 
 
 def resolve_countries(
@@ -265,9 +238,10 @@ def resolve_countries(
     point both the Excel export and the overview table can share.
     """
     config = settings or load_settings()
-    prefetch_asset_countries(issues, settings=config)
+    outcomes = prefetch_asset_countries(issues, settings=config)
     return {
-        issue.get("key"): country_for_issue(issue, settings=config) for issue in issues
+        issue.get("key"): country_for_issue(issue, settings=config, outcomes=outcomes)
+        for issue in issues
     }
 
 
