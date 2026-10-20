@@ -192,3 +192,31 @@ def test_interactive_filters_collection_columns_without_losing_lock(
     with patch.object(interactive, "StreamlitRenderer", side_effect=check_lock):
         interactive.render_interactive(pd.DataFrame({"scalar": [1]}))
     assert held == [True]
+
+
+def test_single_legacy_ticket_keeps_identical_empty_charts_distinct(
+    public_ui: None, tmp_path
+) -> None:
+    """Small valid cohorts can produce equal figures in independent dashboard views."""
+    frame = pd.DataFrame(
+        [
+            {
+                "key": "SDAX-1",
+                "created": pd.Timestamp.now(tz="Europe/Berlin"),
+                "currentstatus_name": "Offen",
+                "currentstatus_date": None,
+                "status_category": "new",
+                "project_key": "SDAX",
+                "firma": "Amparex",
+            }
+        ]
+    )
+    target = tmp_path / "jira_data.pkl"
+    frame.to_pickle(target)
+    before = target.read_bytes()
+    with patch("interactive.render_interactive"):
+        app = AppTest.from_file("app.py", default_timeout=30).run()
+        assert not app.exception and len(app.tabs) == 13
+        app.radio(key="toggle_sources").set_value("Relativ (%)").run()
+        assert not app.exception and len(app.tabs) == 13
+    assert target.read_bytes() == before

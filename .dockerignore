@@ -28,8 +28,33 @@ venv/
 .agents/
 .claude/
 .streamlit/secrets.toml
-data/*
-!data/evex_logo.png
-!data/object_id_to_name.json
+# azd environments hold deployment secrets (.azure/<env>/.env, config.json).
+.azure/
+# Runtime state only; on Azure this path is an Azure Files mount.
+data/
+
+# Deployment and development files the app does not need at runtime.
+infra/
+azure.yaml
+docs/
+.trunk/
+.vscode/
+.superpowers/
+.playwright-mcp/
+.coverage*
+coverage.xml
 
 
+
+# Explicit COPY is the final manifest; omit analysis and tooling from context too.
+tests/
+tools/
+analysis/
+*analysis*.py
+ticket_classifier.py
+classification_cache.py
+build_board_deck.py
+*.pptx
+*.parquet
+*.pkl
+*.xlsx

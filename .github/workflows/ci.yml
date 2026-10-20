@@ -35,7 +35,7 @@ jobs:
       - name: Check clean runtime
         run: >-
           uv run --frozen --no-sync pytest
-          tests/test_dependency_contract.py::test_clean_runtime_imports_supported_entry_points
+          tests/test_runtime_install.py
           --run-runtime-install --no-cov
 
       - name: Check notebook outputs

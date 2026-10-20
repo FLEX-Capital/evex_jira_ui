@@ -53,10 +53,12 @@ def _mode(key: str, *, allow_log: bool = False) -> Literal["absolute", "relative
     return "relative" if choice == MODE_REL else "log" if choice == MODE_LOG else "absolute"
 
 
-def _show(context: DashboardContext, figure: go.Figure, x_label: str | None = None) -> None:
+def _show(
+    context: DashboardContext, figure: go.Figure, x_label: str | None = None, *, key: str
+) -> None:
     figure.update_layout(height=context.plot_height)
     figure.update_xaxes(title_text=x_label or context.x_label)
-    st.plotly_chart(figure, height=context.plot_height, width=context.plot_width)
+    st.plotly_chart(figure, height=context.plot_height, width=context.plot_width, key=key)
 
 
 def render_overview(context: DashboardContext) -> None:
@@ -65,7 +67,11 @@ def render_overview(context: DashboardContext) -> None:
     data = prepare_chart_data(
         context.frame, x=context.x_axis, group="status", group_order=("Fertig",)
     )
-    _show(context, build_distribution_figure(data, mode=_mode("toggle_overview")))
+    _show(
+        context,
+        build_distribution_figure(data, mode=_mode("toggle_overview")),
+        key="chart_overview_0",
+    )
 
 
 def render_categories(context: DashboardContext) -> None:
@@ -83,7 +89,7 @@ def render_categories(context: DashboardContext) -> None:
         mode=_mode("toggle_categories"),
         colors={"Same day": "green", "> 1 day": "#FFD700"},
     )
-    _show(context, figure, "Hauptkategorie")
+    _show(context, figure, "Hauptkategorie", key="chart_categories_0")
 
 
 def render_subcategories(context: DashboardContext) -> None:
@@ -99,7 +105,12 @@ def render_subcategories(context: DashboardContext) -> None:
             strict=True,
         )
     )
-    _show(context, build_distribution_figure(data, colors=colors), "Hauptkategorie")
+    _show(
+        context,
+        build_distribution_figure(data, colors=colors),
+        "Hauptkategorie",
+        key="chart_subcategories_0",
+    )
 
 
 def render_sources(context: DashboardContext) -> None:
@@ -112,14 +123,22 @@ def render_sources(context: DashboardContext) -> None:
         f"{int((~known).sum())} ohne Anfragetyp ausgeschlossen."
     )
     data = prepare_chart_data(frame, x=context.x_axis, group="request_type")
-    _show(context, build_distribution_figure(data, mode=_mode("toggle_sources")))
+    _show(
+        context,
+        build_distribution_figure(data, mode=_mode("toggle_sources")),
+        key="chart_sources_0",
+    )
 
 
 def render_origin(context: DashboardContext) -> None:
     """Render all selected tickets, including an unknown origin segment."""
     st.header("📊 Aufteilung Ursprung Ticket")
     data = prepare_chart_data(context.frame, x=context.x_axis, group="source")
-    _show(context, build_distribution_figure(data, mode=_mode("toggle_ursprung")))
+    _show(
+        context,
+        build_distribution_figure(data, mode=_mode("toggle_ursprung")),
+        key="chart_origin_0",
+    )
 
 
 def render_countries(context: DashboardContext) -> None:
@@ -187,6 +206,7 @@ def render_countries(context: DashboardContext) -> None:
             data, mode=_mode("toggle_countries", allow_log=True), colors=BAND_COLORS
         ),
         "Land",
+        key="chart_countries_0",
     )
 
 
@@ -195,14 +215,19 @@ def render_status(context: DashboardContext) -> None:
     st.header("📊 Offene Tickets nach Status")
     frame = context.frame.loc[context.frame["completion_state"] == "open"]
     data = prepare_chart_data(frame, x="status_category", group="status")
-    _show(context, build_distribution_figure(data), "Statuskategorie")
+    _show(context, build_distribution_figure(data), "Statuskategorie", key="chart_status_0")
 
 
 def render_cycle_time(context: DashboardContext) -> None:
     """Retain canonical completed-ticket duration cohorts and explicit exclusions."""
     st.header("⏱️ Ticketbearbeitungszeit (Fertige Tickets)")
-    for figure in create_resolution_time_charts(context.frame):
-        st.plotly_chart(figure, height=context.plot_height, width=context.plot_width)
+    for index, figure in enumerate(create_resolution_time_charts(context.frame)):
+        st.plotly_chart(
+            figure,
+            height=context.plot_height,
+            width=context.plot_width,
+            key=f"chart_cycle_time_{index}",
+        )
 
 
 def render_resolution(context: DashboardContext) -> None:
@@ -222,6 +247,7 @@ def render_resolution(context: DashboardContext) -> None:
             mode=_mode("toggle_resolution_time"),
             colors={"Same day": "green", "> 1 day": "#FFD700"},
         ),
+        key="chart_resolution_0",
     )
 
 
@@ -241,7 +267,7 @@ def render_customers(context: DashboardContext) -> None:
         totals,
         sum(totals.values()),
     )
-    _show(context, build_distribution_figure(data), "zentrale")
+    _show(context, build_distribution_figure(data), "zentrale", key="chart_customers_0")
 
 
 def render_clones(context: DashboardContext) -> None:
@@ -270,9 +296,9 @@ def render_clones(context: DashboardContext) -> None:
         group="_chart_group",
         sort_x_by_total=True,
     )
-    _show(context, build_distribution_figure(data), "clone_in_project")
+    _show(context, build_distribution_figure(data), "clone_in_project", key="chart_clones_0")
     data = prepare_chart_data(members, x=context.x_axis, group="clone_in_project")
-    _show(context, build_distribution_figure(data))
+    _show(context, build_distribution_figure(data), key="chart_clones_1")
 
 
 def _link_first(frame: pd.DataFrame) -> pd.DataFrame:

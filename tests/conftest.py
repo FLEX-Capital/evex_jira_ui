@@ -20,6 +20,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Install and smoke-test the hashed runtime in an isolated environment.",
     )
 
+    parser.addoption(
+        "--run-runtime-image",
+        action="store_true",
+        dest="run_runtime_image",
+        help="Build and smoke-test the owned Docker runtime image.",
+    )
+
 
 @pytest.fixture
 def public_ui(monkeypatch: pytest.MonkeyPatch) -> None:
