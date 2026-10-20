@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from enum import Enum
@@ -12,6 +13,7 @@ import requests
 from jira import JIRA
 
 import service_desks as desks
+from http_policy import SOURCE, validate_search_page, with_retries
 from service_desks import InvalidIssue, as_utc, effective_start, filter_issue_window
 from settings import (
     DEFAULT_CLOUD_ID,
@@ -330,6 +332,8 @@ def fetch_jira_issues(
     *,
     invalid_row_cb: Callable[[InvalidIssue], None] | None = None,
     settings: Settings | None = None,
+    now: Callable[[], datetime] | None = None,
+    sleep: Callable[[float], None] | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch a complete desk window, reporting invalid dates without raw values."""
     config = settings or load_settings()
@@ -344,12 +348,22 @@ def fetch_jira_issues(
     if max_issues < 1:
         raise ValueError("max_issues must be positive")
     connection = _require_credentials(config)
-    jira = JIRA(
-        server=connection.url, basic_auth=(connection.username, connection.password)
+    clock = now or (lambda: datetime.now(UTC))
+    waiter = sleep or time.sleep
+    jira = with_retries(
+        lambda: JIRA(
+            server=connection.url,
+            basic_auth=(connection.username, connection.password),
+            max_retries=0,
+            timeout=30,
+        ),
+        policy=SOURCE,
+        now=clock,
+        sleep=waiter,
     )
-    # Confirm authentication and project visibility before accepting an empty search.
-    account = jira.myself()
-    jira.project(project)
+    # Authentication/project visibility are checked before accepting emptiness.
+    account = with_retries(jira.myself, policy=SOURCE, now=clock, sleep=waiter)
+    with_retries(lambda: jira.project(project), policy=SOURCE, now=clock, sleep=waiter)
     account_tz = ZoneInfo(account.get("timeZone") or desks.BERLIN.key)
     clauses = [f"project = {project}"]
     if start_dt:
@@ -374,15 +388,20 @@ def fetch_jira_issues(
     # whole set every flush would be quadratic on a multi-hour backfill.
     unflushed = []
     while True:
-        page = jira.enhanced_search_issues(
-            jql_str=jql,
-            maxResults=min(100, max_issues - fetched),
-            nextPageToken=next_token,
-            json_result=True,
-            expand=f"*all,{desks.FIELDS.central},{desks.FIELDS.branch}",
+        page = validate_search_page(
+            with_retries(
+                lambda: jira.enhanced_search_issues(
+                    jql_str=jql,
+                    maxResults=min(100, max_issues - fetched),
+                    nextPageToken=next_token,
+                    json_result=True,
+                    expand=f"*all,{desks.FIELDS.central},{desks.FIELDS.branch}",
+                ),
+                policy=SOURCE,
+                now=clock,
+                sleep=waiter,
+            )
         )
-        if page.get("errorMessages") or "issues" not in page:
-            raise RuntimeError(f"Jira returned an invalid result for {project}")
         batch = page["issues"]
         fetched += len(batch)
         kept = [

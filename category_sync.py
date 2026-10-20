@@ -4,7 +4,6 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from email.utils import parsedate_to_datetime
 from functools import partial
 from typing import Any
 
@@ -12,6 +11,7 @@ import pandas as pd
 import requests
 
 import service_desks as desks
+from http_policy import CATEGORY, RetryDeferred, with_retries
 from settings import Settings, load_settings
 
 CATEGORY_FIELDS = desks.category_fields()
@@ -38,19 +38,6 @@ class CategoryLookup:
     attempts: int
 
 
-def _retry_delay(response, fallback):
-    value = response.headers.get("Retry-After", "") if response is not None else ""
-    try:
-        return max(0, float(value))
-    except ValueError:
-        try:
-            return max(
-                0, (parsedate_to_datetime(value) - datetime.now(UTC)).total_seconds()
-            )
-        except (TypeError, ValueError, OverflowError):
-            return fallback
-
-
 class CategoryResolver:
     """One lookup budget per full identity, including failures, for one import."""
 
@@ -60,10 +47,12 @@ class CategoryResolver:
         sleep: Callable[[float], None] | None = None,
         *,
         settings: Settings | None = None,
+        now: Callable[[], datetime] | None = None,
     ) -> None:
         self.settings = settings or load_settings()
         self.fetch = fetch
         self.sleep = sleep or time.sleep
+        self.now = now or (lambda: datetime.now(UTC))
         self.results: dict[tuple[str, str, str], CategoryLookup] = {}
 
     def resolve(self, cloud_id, workspace_id, object_id):
@@ -75,28 +64,32 @@ class CategoryResolver:
             from jira_loader import fetch_asset_object_uncached
 
             fetch = partial(fetch_asset_object_uncached, settings=self.settings)
-        error = "Unresolved category"
-        for attempt in range(1, 4):
-            try:
-                asset = fetch(*identity)
-                if str(asset.get("id")) != identity[2]:
-                    raise ValueError("Assets returned a different object identity")
-                label = text_value(asset.get("label") or asset.get("name"))
-                if not label:
-                    raise ValueError("Assets object has no label")
-                result = CategoryLookup(label, None, attempt)
-                break
-            except (requests.RequestException, PermissionError, ValueError) as exc:
-                response = getattr(exc, "response", None)
-                status = response.status_code if response is not None else None
-                error = f"HTTP {status}" if status else type(exc).__name__
-                transient = isinstance(
-                    exc, (requests.Timeout, requests.ConnectionError)
-                ) or (status is not None and (status == 429 or 500 <= status < 600))
-                if not transient or attempt == 3:
-                    result = CategoryLookup(None, error, attempt)
-                    break
-                self.sleep(_retry_delay(response, attempt))
+        attempts = 0
+
+        def lookup() -> str:
+            nonlocal attempts
+            attempts += 1
+            asset = fetch(*identity)
+            if str(asset.get("id")) != identity[2]:
+                raise ValueError("Assets returned a different object identity")
+            label = text_value(asset.get("label") or asset.get("name"))
+            if not label:
+                raise ValueError("Assets object has no label")
+            return label
+
+        try:
+            label = with_retries(
+                lookup, policy=CATEGORY, now=self.now, sleep=self.sleep
+            )
+            result = CategoryLookup(label, None, attempts)
+        except RetryDeferred:
+            result = CategoryLookup(None, "deferred", attempts)
+        except (requests.RequestException, PermissionError, ValueError) as exc:
+            response = getattr(exc, "response", None)
+            status = response.status_code if response is not None else None
+            result = CategoryLookup(
+                None, f"HTTP {status}" if status else type(exc).__name__, attempts
+            )
         self.results[identity] = result
         return result
 

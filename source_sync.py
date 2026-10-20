@@ -1,14 +1,18 @@
 """Refresh missing ticket origins without restricting ticket creation dates."""
 
 import re
+import time
+from datetime import UTC, datetime
+from typing import Any
 
 import requests
 
 import service_desks as desks
+from http_policy import SOURCE, InvalidSearchPayload, validate_search_page, with_retries
 from settings import load_settings
 
 
-def fetch_issue_fields(keys, fields, *, settings=None):
+def fetch_issue_fields(keys, fields, *, settings=None, now=None, sleep=None):
     """Batch-read selected fields; omitted issues/fields stay distinguishable."""
     keys = list(dict.fromkeys(keys))
     if not keys:
@@ -31,18 +35,30 @@ def fetch_issue_fields(keys, fields, *, settings=None):
             }
             tokens = set()
             while True:
-                response = session.post(
-                    f"{base}/rest/api/3/search/jql", json=payload, timeout=30
+
+                def read_page() -> dict[str, Any]:
+                    response = session.post(
+                        f"{base}/rest/api/3/search/jql", json=payload, timeout=30
+                    )
+                    response.raise_for_status()
+                    try:
+                        return validate_search_page(response.json())
+                    except ValueError:
+                        raise InvalidSearchPayload("invalid_search_payload") from None
+
+                page = with_retries(
+                    read_page,
+                    policy=SOURCE,
+                    now=now or (lambda: datetime.now(UTC)),
+                    sleep=sleep or time.sleep,
                 )
-                response.raise_for_status()
-                page = response.json()
-                for issue in page.get("issues", []):
+                for issue in page["issues"]:
                     results[issue["key"]] = issue.get("fields") or {}
                 token = page.get("nextPageToken")
                 if not token:
                     break
                 if token in tokens:
-                    raise RuntimeError("Jira repeated a pagination token")
+                    raise InvalidSearchPayload("repeated_pagination_token")
                 tokens.add(token)
                 payload["nextPageToken"] = token
     return results

@@ -37,7 +37,12 @@ analysis = [
   "pytz>=2026.2",
   "tqdm>=4.70.1",
 ]
-dev = ["httpx>=0.28.1", "pytest>=8.0", "pytest-cov>=5"]
+dev = [
+  "httpx>=0.28.1",
+  "pytest>=8.0",
+  "pytest-cov>=5",
+  "types-requests>=2.33.0.20261006",
+]
 
 # The suite is also runnable as `python -m unittest discover -s tests`, which puts
 # both the repo root and tests/ on sys.path. Mirror that for pytest so the two
@@ -73,6 +78,9 @@ convention = "google"
 ignore-names = ["i", "j", "k", "e", "ex", "df"]
 
 [tool.mypy]
+# Resolve installed dependencies/stubs from the locked project environment even
+# when Trunk launches mypy from its separate tool runtime.
+python_executable = ".venv/bin/python"
 # Trunk runs files concurrently in isolated sandboxes; shared incremental state
 # can contain cross references to another sandbox and crash mypy.
 incremental = false
