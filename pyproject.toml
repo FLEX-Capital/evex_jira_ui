@@ -70,6 +70,9 @@ convention = "google"
 ignore-names = ["i", "j", "k", "e", "ex", "df"]
 
 [tool.mypy]
+# Trunk runs files concurrently in isolated sandboxes; shared incremental state
+# can contain cross references to another sandbox and crash mypy.
+incremental = false
 python_version = "3.12"
 disallow_untyped_defs = true
 ignore_missing_imports = true
