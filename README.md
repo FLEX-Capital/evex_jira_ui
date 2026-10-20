@@ -216,27 +216,43 @@ download and backs up the cache before saving successfully resolved labels.
 ## Country resolution (Länder tab)
 
 A ticket's country escalates Ansprechpartner → Filiale → Zentrale; the first
-asset carrying a `Land` attribute wins. Only asset references from the normal
-workspace are used — an objectId from another workspace is discarded rather
-than resolved, because the country cache is keyed by objectId alone and a
-foreign id would otherwise borrow an unrelated site's country.
+successfully resolved nonempty country wins. Only the first reference in each
+field is used. Full cloud/workspace/object identity prevents foreign references
+from borrowing a normal object's value. An earlier failure remains visible even
+when a later reference supplies a country.
 
-The cache lives in `data/asset_country.json` as `{object_id: country_or_null}`.
-A dashboard refresh fills `Land` from that cache without calling the Assets
-API, so refreshed tickets are charted immediately. Assets the cache has never
-seen become **`Land noch nicht ermittelt`** — distinct from `Kein Land am
-Asset`, which means the asset was fetched and genuinely carries no country.
-The Länder tab reports how many tickets are in that state.
+`DATA_DIR/asset_country.json` uses version 2 records with full identity, outcome
+and UTC fetch time. Found values expire after seven days; verified empty-country
+values after one day. Reads and dashboard reruns never call Assets or rewrite
+this file. Stale stored values remain visible with offline status counts. Legacy
+bare-ID values remain unverified; existing ticket `Land` is preserved until
+explicit maintenance revalidates the reference. Failed lookups never become
+verified empty-country entries and can recover on the next invocation.
 
 ```sh
-# Resolve every asset the cache does not know yet, then write Land back
+# Resolve absent/expired values without publishing, then explicitly publish
 uv run --frozen --no-sync --env-file .env python backfill_country.py --dry-run
 uv run --frozen --no-sync --env-file .env python backfill_country.py
 
-# Re-resolve ids cached as null by older versions, which stored a failed
-# lookup the same way as "this asset has no Land" and never retried it
+# Recheck even fresh known values; retry old unverified null metadata
+uv run --frozen --no-sync --env-file .env python backfill_country.py --force-refresh
 uv run --frozen --no-sync --env-file .env python backfill_country.py --retry-unknown
+
+# Metadata-only inspection; creates no files or tenant identity
+uv run --frozen --no-sync --env-file .env python country_cache.py migrate --path data/asset_country.json
+# Explicit apply requires the revision printed above and makes an exact backup
+uv run --frozen --no-sync --env-file .env python country_cache.py migrate --path data/asset_country.json --apply --expected-revision INODE:SIZE:MTIME_NS
+
+# Two-column Issue Country workbook from the captured raw snapshot
+uv run --frozen --no-sync --env-file .env python jira_country_export.py
 ```
+
+Country export keeps exactly `Jira Issue ID` and `Country`. Its separate safe
+summary reports incomplete causes; exit codes are 0 complete, 1 incomplete
+lookup set, 2 invalid input/configuration, and 3 workbook publication failure.
+A genuinely empty country is complete. `--refetch` defaults to 2025-01-01 through
+today in Berlin, capped at invocation time; `--end` includes the selected local
+day across DST transitions. Workbook publication is atomic.
 
 Writing over the input takes a `data/jira_data.pkl.bak-*` backup first.
 
@@ -244,7 +260,7 @@ The **🌍 Länder aktualisieren** button on the _Interaktiv_ tab runs the same
 resolution against the whole stored cache — every ticket, regardless of the
 selected period and company — and is how a hosted instance whose data differs
 from the local cache brings its existing tickets up to date. It needs Assets
-credentials, and a cold cache means one API call per unknown asset, so the
+credentials, and a cold cache means at least one API request per unknown asset, so the
 first run can take a while.
 
 ## Storage and validation

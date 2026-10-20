@@ -76,6 +76,37 @@ def test_dry_run_writes_neither_pickle_nor_cache(workspace, monkeypatch):
     assert not list(source.parent.glob("*.bak-*"))
 
 
+def test_country_maintenance_keeps_concurrent_ticket_changes(
+    workspace: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A prepared country result cannot replace changed keys, refs or Jira fields."""
+    from data_loading import CacheChangedError
+
+    source, cache = workspace
+    latest = pd.read_pickle(source)
+    latest.loc[0, ["summary", "ansprechpartner", "Hauptkategorie"]] = [
+        "concurrent Jira value",
+        "ID_changed",
+        "concurrent category",
+    ]
+
+    def resolve(object_id: str, **kwargs: Any) -> str:
+        latest.to_pickle(source)
+        return "Deutschland"
+
+    monkeypatch.setattr(backfill_country, "resolve_asset_country_strict", resolve)
+    with pytest.raises(CacheChangedError):
+        _run(monkeypatch, "--input", str(source), "--cache", str(cache))
+    current = pd.read_pickle(source).iloc[0]
+    assert current.summary == "concurrent Jira value"
+    assert (
+        current.ansprechpartner == "ID_changed"
+        and current.Hauptkategorie == "concurrent category"
+    )
+    assert asset_country.load_cache(cache).entries
+
+
 def test_retry_unknown_drops_cached_nulls(workspace, monkeypatch):
     """Legacy caches stored failed lookups as null; --retry-unknown clears them."""
     source, cache = workspace

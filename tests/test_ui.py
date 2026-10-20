@@ -9,6 +9,54 @@ from ui_env import without_ui_password
 from settings import load_settings
 
 
+def test_source_maintenance_uses_captured_settings_and_safe_errors(
+    public_ui: None,
+) -> None:
+    """Source maintenance captures one settings snapshot and renders bounded causes."""
+    frame = CountryRefreshUITests()._frame()
+    with (
+        patch("data_loading.load_data", return_value=frame),
+        patch("interactive.render_interactive"),
+        patch(
+            "source_sync.refresh_missing_sources",
+            side_effect=PermissionError("SYNTHETIC_PRIVATE_MARKER"),
+        ) as refresh,
+    ):
+        app = AppTest.from_file("app.py", default_timeout=30).run()
+        app.sidebar.date_input[0].set_value((date(2026, 9, 1), date(2026, 9, 10))).run()
+        next(b for b in app.button if "Ursprung" in b.label).click().run()
+    assert not app.exception
+    assert all("SYNTHETIC_PRIVATE_MARKER" not in e.value for e in app.error)
+    assert any("permission" in e.value for e in app.error)
+    assert (
+        refresh.call_args.kwargs["fetch_sources"].keywords["settings"]
+        == load_settings()
+    )
+
+
+def test_source_maintenance_preserves_concurrent_revision(public_ui: None) -> None:
+    """A prepared source frame cannot overwrite an intervening Jira/category edit."""
+    frame = CountryRefreshUITests()._frame()
+    revision = ["before"]
+
+    def refresh(current: pd.DataFrame, **kwargs: object) -> tuple[pd.DataFrame, int]:
+        revision[0] = "after"
+        return current.assign(source="prepared source"), len(current)
+
+    with (
+        patch("data_loading.load_data", return_value=frame),
+        patch("data_loading.cache_revision", side_effect=lambda *a, **k: revision[0]),
+        patch("data_loading.save_data") as save,
+        patch("source_sync.refresh_missing_sources", side_effect=refresh),
+        patch("interactive.render_interactive"),
+    ):
+        app = AppTest.from_file("app.py", default_timeout=30).run()
+        app.sidebar.date_input[0].set_value((date(2026, 9, 1), date(2026, 9, 10))).run()
+        next(b for b in app.button if "Ursprung" in b.label).click().run()
+    assert not app.exception and any("parallel" in e.value for e in app.error)
+    save.assert_not_called()
+
+
 class CompanyUITests(unittest.TestCase):
     def setUp(self):
         without_ui_password(self)

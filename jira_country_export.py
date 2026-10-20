@@ -25,19 +25,27 @@ Usage:
 import argparse
 import json
 import os
+from collections import Counter
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from functools import partial
+from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pandas as pd
 
 import asset_country as country_policy
 import service_desks as desks
 from country_cache import AssetIdentity
-from http_policy import COUNTRY
+from file_io import AtomicWriteError, atomic_write
+from http_policy import COUNTRY, validate_search_page
 from jira_loader import fetch_asset_object, fetch_jira_issues
+from operation_errors import DIAGNOSTIC_CODES, OperationDiagnostic, safe_diagnostic
 from reporting_policy import BERLIN
+from service_desks import berlin_day_end, berlin_day_start
 from settings import DEFAULT_CLOUD_ID, DEFAULT_WORKSPACE_ID, Settings, load_settings
 
 CLOUD_ID = DEFAULT_CLOUD_ID
@@ -170,15 +178,23 @@ def load_issues(
     refetch: bool,
     project: str,
     start: str,
-    end: str,
+    end: str | None,
     max_issues: int,
     *,
     settings: Settings | None = None,
+    now: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> list[dict[str, Any]]:
     """Load issues from the saved JSON, or re-pull them from Jira."""
     if refetch:
-        start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=BERLIN)
-        end_dt = datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=BERLIN)
+        requested_at = now()
+        if requested_at.tzinfo is None or requested_at.utcoffset() is None:
+            raise ValueError("invalid_clock")
+        today = requested_at.astimezone(BERLIN).date()
+        start_dt = berlin_day_start(date.fromisoformat(start))
+        end_day = date.fromisoformat(end) if end else today
+        end_dt = min(berlin_day_end(end_day), requested_at)
+        if start_dt > end_dt or project not in desks.BY_KEY or max_issues <= 0:
+            raise ValueError("invalid_export_selection")
         print(
             f"Re-fetching issues from Jira: project={project} "
             f"{start}..{end} (max {max_issues})"
@@ -197,17 +213,16 @@ def load_issues(
         )
     print(f"Loading issues from {input_path}")
     with open(input_path) as f:
-        return json.load(f)
+        return validate_search_page({"issues": json.load(f)})["issues"]
 
 
 def prefetch_asset_countries(
-    issues: list[dict[str, Any]], workers: int = 4, *, settings: Settings | None = None
+    issues: Sequence[Mapping[str, Any]],
+    workers: int = 4,
+    *,
+    settings: Settings | None = None,
 ) -> dict[AssetIdentity, country_policy.CountryLookup]:
-    """Warm the resolver cache by fetching every unique asset concurrently.
-
-    The full ticket set references only a couple of thousand distinct assets,
-    so resolving them in parallel turns a ~15 minute serial run into ~1 minute.
-    """
+    """Fetch each full asset identity once within this export invocation."""
     config = settings or load_settings()
     identities = sorted(
         {
@@ -229,20 +244,74 @@ def prefetch_asset_countries(
         return dict(zip(identities, lookups, strict=True))
 
 
-def resolve_countries(
-    issues: list[dict[str, Any]], *, settings: Settings | None = None
-) -> dict[str | None, str | None]:
-    """Return {issue key: country} for every issue, via the escalation logic.
+@dataclass(frozen=True)
+class CountryExportResult:
+    """Two-column country data accompanied by payload-free incomplete causes."""
 
-    Warms the asset cache concurrently first, so this is the single entry
-    point both the Excel export and the overview table can share.
+    countries: dict[str, str | None]
+    diagnostics: tuple[OperationDiagnostic, ...]
+
+
+def resolve_country_report(
+    issues: Sequence[Mapping[str, Any]],
+    *,
+    settings: Settings | None = None,
+) -> CountryExportResult:
+    """Resolve each country and report every failed or unverified reference.
+
+    Args:
+        issues: Saved or fetched ticket records with keyed reference fields.
+        settings: One captured operation snapshot.
+
+    Returns:
+        Country mapping plus safe causes; verified empty attributes are complete.
     """
     config = settings or load_settings()
-    outcomes = prefetch_asset_countries(issues, settings=config)
-    return {
-        issue.get("key"): country_for_issue(issue, settings=config, outcomes=outcomes)
-        for issue in issues
-    }
+    records = validate_search_page({"issues": [dict(issue) for issue in issues]})[
+        "issues"
+    ]
+    outcomes = prefetch_asset_countries(records, settings=config)
+    countries: dict[str, str | None] = {}
+    diagnostics: list[OperationDiagnostic] = []
+    operation_id = uuid4().hex
+    for issue in records:
+        key = issue["key"]
+        countries[key] = country_for_issue(issue, settings=config, outcomes=outcomes)
+        seen: set[tuple[AssetIdentity | None, str]] = set()
+        for _, identity in country_policy.country_references(
+            issue, tenant=config.tenant
+        ):
+            lookup = outcomes.get(identity) if identity is not None else None
+            if lookup is not None and lookup.outcome in ("found", "no_country"):
+                continue
+            code = lookup.error_code if lookup is not None else "invalid_identity"
+            if code is None or code not in DIAGNOSTIC_CODES:
+                code = "invalid_payload"
+            marker = (identity, code)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            diagnostics.append(
+                OperationDiagnostic(
+                    operation_id,
+                    "assets",
+                    code,
+                    project=key.split("-")[0],
+                    key=key,
+                    retryable=code
+                    in {"timeout", "connection", "rate_limited", "deferred"},
+                )
+            )
+    return CountryExportResult(countries, tuple(diagnostics))
+
+
+def resolve_countries(
+    issues: list[dict[str, Any]],
+    *,
+    settings: Settings | None = None,
+) -> dict[str, str | None]:
+    """Preserve the mapping adapter while the report API exposes incompleteness."""
+    return resolve_country_report(issues, settings=settings).countries
 
 
 def build_country_frame(
@@ -253,9 +322,8 @@ def build_country_frame(
     return pd.DataFrame(list(countries.items()), columns=["Jira Issue ID", "Country"])
 
 
-def main():
-    config = load_settings()
-    paths = config.paths
+def main(argv: Sequence[str] | None = None) -> int:
+    """Export a workbook; return 0 complete, 1 incomplete, 2 invalid, 3 publish failure."""
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -280,10 +348,12 @@ def main():
         help="Project key to fetch when --refetch (default: SDAX)",
     )
     parser.add_argument(
-        "--start", default="2020-01-01", help="Start date YYYY-MM-DD for --refetch"
+        "--start", default="2025-01-01", help="Start date YYYY-MM-DD for --refetch"
     )
     parser.add_argument(
-        "--end", default="2026-12-31", help="End date YYYY-MM-DD for --refetch"
+        "--end",
+        default=None,
+        help="Inclusive Berlin end day (default: today, capped at now)",
     )
     parser.add_argument(
         "--max-issues",
@@ -291,34 +361,55 @@ def main():
         default=100000,
         help="Max issues to fetch when --refetch",
     )
-    args = parser.parse_args()
-    args.input = args.input or str(paths.raw_snapshot)
-    args.output = args.output or str(paths.root / "issue_country.xlsx")
-
-    issues = load_issues(
-        args.input,
-        args.refetch,
-        args.project,
-        args.start,
-        args.end,
-        args.max_issues,
-        settings=config,
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code or 0)
+    try:
+        config = load_settings()
+        paths = config.paths
+        args.input = args.input or str(paths.raw_snapshot)
+        args.output = args.output or str(paths.root / "issue_country.xlsx")
+        issues = load_issues(
+            args.input,
+            args.refetch,
+            args.project,
+            args.start,
+            args.end,
+            args.max_issues,
+            settings=config,
+        )
+        result = resolve_country_report(issues, settings=config)
+    except (ValueError, TypeError, FileNotFoundError):
+        print("Invalid country export input/configuration.")
+        return 2
+    except Exception as exc:  # noqa: BLE001 - safe operation boundary
+        cause = safe_diagnostic(exc, operation_id=uuid4().hex, stage="fetch")
+        print(f"Country export incomplete ({cause.code}).")
+        return 1
+    frame = pd.DataFrame(
+        list(result.countries.items()), columns=["Jira Issue ID", "Country"]
     )
-    print(f"Resolving country for {len(issues)} issues...")
-    df = build_country_frame(issues, settings=config)
-
-    resolved = df["Country"].notna().sum()
+    counts = Counter(cause.code for cause in result.diagnostics)
     print(
-        f"\nCountry resolved for {resolved}/{len(df)} issues "
-        f"({len(df) - resolved} without a country)."
+        f"Countries: {int(frame['Country'].notna().sum())}/{len(frame)}; "
+        f"incomplete lookups: {len(result.diagnostics)}."
     )
-    print("Country distribution:")
-    print(df["Country"].value_counts(dropna=False).to_string())
-
-    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
-    df.to_excel(args.output, index=False, sheet_name="Issue Country")
-    print(f"\nWrote {len(df)} rows to {args.output}")
+    if counts:
+        print(json.dumps(dict(sorted(counts.items()))))
+    try:
+        atomic_write(
+            Path(args.output),
+            lambda handle: frame.to_excel(
+                handle, index=False, sheet_name="Issue Country"
+            ),
+        )
+    except (OSError, AtomicWriteError):
+        print("Country workbook publication failed (save_failed).")
+        return 3
+    print(f"Wrote {len(frame)} rows.")
+    return 1 if result.diagnostics else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

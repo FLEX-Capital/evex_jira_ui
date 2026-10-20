@@ -1,4 +1,7 @@
+from dataclasses import asdict
 from datetime import datetime, timedelta
+from functools import partial
+from uuid import uuid4
 
 import pandas as pd
 import plotly.express as px
@@ -17,6 +20,7 @@ from data_loading import load_data_snapshot, save_data_if_unchanged
 from data_transformation import enrich_jira_time_metrics
 from file_io import FileSnapshotChangedError
 from interactive import render_interactive
+from operation_errors import safe_diagnostic
 from plotting import (
     apply_font,
     create_resolution_time_charts,
@@ -33,11 +37,24 @@ from service_desks import (
     filter_companies,
 )
 from settings import SettingsError, load_settings
-from source_sync import refresh_missing_sources
+from source_sync import fetch_issue_sources, refresh_missing_sources
 from styles import CUSTOM_CSS
 from sync_jobs import render_sidebar_refresh
 from temporary_history_pull import render_history_pull
 from ui_auth import require_password
+
+
+def _maintenance_failure(label: str, stage: str, exc: Exception) -> None:
+    """Show a bounded cause while retaining its separate safe diagnostic."""
+    cause = safe_diagnostic(exc, operation_id=uuid4().hex, stage=stage)
+    st.session_state["maintenance_diagnostic"] = asdict(cause)
+    message = f"{label} fehlgeschlagen ({cause.code})."
+    if cause.code == "cache_changed":
+        message += (
+            " Cache wurde parallel geändert; bitte die Aktualisierung wiederholen."
+        )
+    st.error(message)
+
 
 # set to dark mode
 st.set_page_config(page_title="Jira Analytics Dashboard", layout="wide")
@@ -792,13 +809,24 @@ with tab_interactive:
 
     if refresh_sources:
         try:
+            source_config = load_settings()
             with st.spinner("Fehlende Ursprünge werden mit Jira abgeglichen …"):
-                cached_df, revision = load_data_snapshot(path=paths.tickets)
-                cached_df, sources_updated = refresh_missing_sources(cached_df)
-                save_data_if_unchanged(cached_df, revision, path=paths.tickets)
+                cached_df, revision = load_data_snapshot(
+                    path=source_config.paths.tickets, settings=source_config
+                )
+                cached_df, sources_updated = refresh_missing_sources(
+                    cached_df,
+                    fetch_sources=partial(fetch_issue_sources, settings=source_config),
+                )
+                save_data_if_unchanged(
+                    cached_df,
+                    revision,
+                    path=source_config.paths.tickets,
+                    settings=source_config,
+                )
             st.session_state["source_sync_success"] = sources_updated
         except Exception as exc:  # noqa: BLE001 - report optional/isolated failures
-            st.error(f"Ursprung-Abgleich fehlgeschlagen: {exc}")
+            _maintenance_failure("Ursprung-Abgleich", "source", exc)
         else:
             st.rerun()
 
@@ -855,7 +883,7 @@ with tab_interactive:
             stats["pending"] = int((cached_df["Land"] == NOT_RESOLVED).sum())
             st.session_state["country_sync_success"] = stats
         except Exception as exc:  # noqa: BLE001 - report optional/isolated failures
-            st.error(f"Länder-Abgleich fehlgeschlagen: {exc}")
+            _maintenance_failure("Länder-Abgleich", "assets", exc)
         else:
             st.rerun()
 
