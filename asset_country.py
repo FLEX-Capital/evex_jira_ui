@@ -14,6 +14,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 
+from settings import load_settings
+
 CACHE_PATH = "data/asset_country.json"
 
 NO_COUNTRY_ON_ASSET = "Kein Land am Asset"
@@ -47,15 +49,16 @@ def normalise_object_id(value):
     return text
 
 
-def load_cache(path=CACHE_PATH):
+def load_cache(path=None):
     """Return {object_id: country_or_None}; {} when the file is absent."""
+    path = load_settings().paths.countries if path is None else path
     if not os.path.exists(path):
         return {}
     with open(path, encoding="utf-8") as handle:
         return json.load(handle)
 
 
-def save_cache(cache, path=CACHE_PATH, *, baseline=None):
+def save_cache(cache, path=None, *, baseline=None):
     """Merge a job's changes under a shared lock, then atomically replace.
 
     A baseline lets retries remove old nulls without erasing another job's
@@ -63,6 +66,7 @@ def save_cache(cache, path=CACHE_PATH, *, baseline=None):
     """
     from data_loading import cache_lock
 
+    path = load_settings().paths.countries if path is None else path
     with cache_lock(path):
         current = load_cache(path)
         if baseline is None:
@@ -180,7 +184,7 @@ def collect_object_ids(df):
 
 def refresh_countries(
     df,
-    cache_path=CACHE_PATH,
+    cache_path=None,
     retry_unknown=False,
     resolver=None,
     workers=4,

@@ -19,7 +19,6 @@ from pathlib import Path
 import pandas as pd
 
 from asset_country import (
-    CACHE_PATH,
     ESCALATION_COLUMNS,
     NO_ASSETS_LINKED,
     NO_COUNTRY_ON_ASSET,
@@ -30,13 +29,13 @@ from asset_country import (
     save_cache,
 )
 from data_loading import (
-    DATA_PATH,
     CacheChangedError,
     cache_lock,
     cache_revision,
     save_data,
 )
 from resolution_bands import classify_bands
+from settings import load_settings
 
 DEFAULT_INPUT = "data/jira_data.pkl"
 
@@ -86,8 +85,8 @@ def write_pickle_atomically(df, path):
     than reimplementing either behaviour. A custom --output gets the same
     tempfile-then-replace treatment, minus the cache-specific column pruning.
     """
-    if os.path.abspath(path) == os.path.abspath(DATA_PATH):
-        save_data(df)
+    if os.path.abspath(path) == str(load_settings().paths.tickets):
+        save_data(df, path=path)
         return
 
     target = Path(path)
@@ -104,10 +103,11 @@ def write_pickle_atomically(df, path):
 
 
 def main():
+    paths = load_settings().paths
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", default=DEFAULT_INPUT)
+    parser.add_argument("--input", default=None)
     parser.add_argument("--output", default=None, help="defaults to --input")
-    parser.add_argument("--cache", default=CACHE_PATH)
+    parser.add_argument("--cache", default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
         "--retry-unknown",
@@ -120,6 +120,8 @@ def main():
         ),
     )
     args = parser.parse_args()
+    args.input = args.input or str(paths.tickets)
+    args.cache = args.cache or str(paths.countries)
 
     output = args.output or args.input
 

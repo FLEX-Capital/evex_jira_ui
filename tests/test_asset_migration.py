@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,15 +11,13 @@ import asset_migration
 
 class AssetMigrationTests(unittest.TestCase):
     def test_cli_refuses_to_write_when_any_category_lookup_fails(self):
-        import data_loading
-
         frame = pd.DataFrame({"key": ["SDAX-1"], "Hauptkategorie": ["Existing"]})
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "cache.pkl"
+            path = Path(tmp) / "jira_data.pkl"
             frame.to_pickle(path)
             original = path.read_bytes()
             with (
-                patch.object(data_loading, "DATA_PATH", str(path)),
+                patch.dict(os.environ, {"DATA_DIR": tmp}),
                 patch.object(
                     asset_migration,
                     "migrate_categories",
@@ -35,16 +34,14 @@ class AssetMigrationTests(unittest.TestCase):
             self.assertEqual(list(Path(tmp).glob("*.bak-*")), [])
 
     def test_cli_success_backs_up_cache_and_preserves_other_fields(self):
-        import data_loading
-
         frame = pd.DataFrame({"key": ["SDAX-1"], "Hauptkategorie": ["Unbekannt"]})
         repaired = frame.assign(Hauptkategorie="Live category")
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "cache.pkl"
+            path = Path(tmp) / "jira_data.pkl"
             frame.to_pickle(path)
             original = path.read_bytes()
             with (
-                patch.object(data_loading, "DATA_PATH", str(path)),
+                patch.dict(os.environ, {"DATA_DIR": tmp}),
                 patch.object(
                     asset_migration,
                     "migrate_categories",

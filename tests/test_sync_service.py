@@ -47,7 +47,7 @@ def test_all_projects_use_current_transformation_and_commit_with_one_backup(
     assert df.loc[df.key == "SDAX-1", "Hauptkategorie"].iloc[0] == "Main"
     assert "resolution_band" in df
     assert report.complete and report.rows == 4
-    backups = list(storage.parent.glob("cache.pkl.bak-*"))
+    backups = list(storage.parent.glob(f"{storage.name}.bak-*"))
     assert len(backups) == 1 and backups[0].read_bytes() == original
     assert (
         json.loads((storage.parent / "import_status.json").read_text())["state"]

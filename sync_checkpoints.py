@@ -3,6 +3,7 @@
 import json
 import os
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -15,10 +16,19 @@ from jira_loader import (
     fetch_jira_issues,
 )
 from service_desks import InvalidIssue, as_utc, effective_start, filter_issue_window
+from settings import load_settings
 
 
 class CheckpointStore:
-    def __init__(self, checkpoint_dir, *, progress=None):
+    def __init__(
+        self,
+        checkpoint_dir: str | Path | None = None,
+        *,
+        progress: Callable[[str], None] | None = None,
+    ) -> None:
+        checkpoint_dir = (
+            load_settings().paths.root if checkpoint_dir is None else checkpoint_dir
+        )
         self.template = str(Path(checkpoint_dir) / "backfill_{project}.json")
         self.save_every = 100
         self.progress = progress
@@ -330,7 +340,7 @@ def fetch_project(
     end_dt,
     resume,
     *,
-    checkpoint_dir,
+    checkpoint_dir=None,
     category_resolver=None,
     progress=None,
     invalid_row_cb=None,

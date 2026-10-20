@@ -1,5 +1,7 @@
 """The offline suite must never fall through to a real Jira/Assets request."""
 
+from pathlib import Path
+
 import pytest
 import requests
 
@@ -20,17 +22,21 @@ def forbid_unmocked_network(monkeypatch):
     monkeypatch.setattr(requests.sessions.Session, "request", forbidden)
 
 
+@pytest.fixture(autouse=True)
+def isolated_data_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep every default artifact under test-owned temporary storage."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+
 @pytest.fixture
 def storage(tmp_path, monkeypatch):
     from test_sync_service import raw
 
     import asset_country
     import category_sync
-    import data_loading
     import jira_loader
 
-    path = tmp_path / "cache.pkl"
-    monkeypatch.setattr(data_loading, "DATA_PATH", str(path))
+    path = tmp_path / "jira_data.pkl"
     monkeypatch.setattr(
         jira_loader,
         "fetch_asset_object_uncached",

@@ -13,13 +13,7 @@ from category_sync import CategoryRepairReport
 
 @pytest.fixture(autouse=True)
 def isolated_cli(tmp_path, monkeypatch):
-    monkeypatch.setattr(data_loading, "DATA_PATH", str(tmp_path / "cache.pkl"))
-    monkeypatch.setattr(
-        backfill, "DATA_PATH", str(tmp_path / "cache.pkl"), raising=False
-    )
-    monkeypatch.setattr(
-        backfill, "CHECKPOINT_TMPL", str(tmp_path / "{project}.json"), raising=False
-    )
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
 
     def forbidden(*a, **k):
         raise AssertionError("A test attempted an unmocked Jira connection")
@@ -70,7 +64,7 @@ def test_cli_default_and_relative_windows_use_captured_now(flags, days):
 def test_cli_unresolved_categories_and_busy_import_return_nonzero(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr(data_loading, "DATA_PATH", str(tmp_path / "cache.pkl"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
     report = desk_sync.SyncReport(categories=CategoryRepairReport(unresolved_cells=1))
     with patch.object(backfill, "run_sync", return_value=report):
         assert backfill.main(["--days", "7"]) == 1
@@ -81,7 +75,7 @@ def test_cli_unresolved_categories_and_busy_import_return_nonzero(
 def test_cli_runs_real_core_without_a_browser_or_writes_outside_its_storage(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr(data_loading, "DATA_PATH", str(tmp_path / "cache.pkl"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setattr(sync_checkpoints, "fetch_jira_issues", lambda *a, **k: [])
     assert backfill.main(["--project", "SDAX", "--days", "7"]) == 0
     assert (tmp_path / "import_status.json").exists()

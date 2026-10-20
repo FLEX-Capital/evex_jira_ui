@@ -216,17 +216,20 @@ def build_country_frame(issues: list) -> pd.DataFrame:
 
 
 def main():
+    from settings import load_settings
+
+    paths = load_settings().paths
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
         "--input",
-        default=DEFAULT_INPUT,
+        default=None,
         help=f"Issues JSON to read (default: {DEFAULT_INPUT})",
     )
     parser.add_argument(
         "--output",
-        default=DEFAULT_OUTPUT,
+        default=None,
         help=f"Excel file to write (default: {DEFAULT_OUTPUT})",
     )
     parser.add_argument(
@@ -252,6 +255,8 @@ def main():
         help="Max issues to fetch when --refetch",
     )
     args = parser.parse_args()
+    args.input = args.input or str(paths.raw_snapshot)
+    args.output = args.output or str(paths.root / "issue_country.xlsx")
 
     issues = load_issues(
         args.input, args.refetch, args.project, args.start, args.end, args.max_issues

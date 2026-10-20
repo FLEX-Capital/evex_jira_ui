@@ -8,9 +8,15 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from settings import load_settings
+
 DATA_PATH = "data/jira_data.pkl"
 _mutex = threading.RLock()
 _lock_state = threading.local()
+
+
+def _ticket_path(path: str | Path | None = None) -> Path:
+    return Path(path).resolve() if path is not None else load_settings().paths.tickets
 
 
 class CacheChangedError(RuntimeError):
@@ -23,7 +29,7 @@ class ImportBusyError(RuntimeError):
 
 @contextmanager
 def import_operation_lock(data_path=None):
-    path = Path(data_path or DATA_PATH).resolve()
+    path = _ticket_path(data_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with Path(f"{path}.import.lock").open("a+b") as handle:
         try:
@@ -45,7 +51,7 @@ def cache_lock(path=None):
     Lock a stable sidecar, not the pickle inode replaced by atomic saves. The
     thread lock plus nesting check makes save_data safe inside a transaction.
     """
-    path = Path(path or DATA_PATH).resolve()
+    path = _ticket_path(path)
     with _mutex:
         previous = getattr(_lock_state, "path", None)
         if previous == path:
@@ -64,7 +70,7 @@ def cache_lock(path=None):
 
 def cache_revision(path=None):
     try:
-        stat = Path(path or DATA_PATH).stat()
+        stat = _ticket_path(path).stat()
     except FileNotFoundError:
         return None
     return stat.st_ino, stat.st_size, stat.st_mtime_ns
@@ -72,15 +78,14 @@ def cache_revision(path=None):
 
 def load_data_snapshot(path=None):
     """Read a coherent frame and revision for a later conditional save."""
-    with cache_lock(path):
-        return (
-            load_data(path=path) if path is not None else load_data()
-        ), cache_revision(path)
+    target = _ticket_path(path)
+    with cache_lock(target):
+        return load_data(path=target), cache_revision(target)
 
 
 def save_data_if_unchanged(df, revision, *, backup_prefix=None, path=None):
     """Commit a snapshot only if no writer has replaced its input meanwhile."""
-    target = Path(path or DATA_PATH)
+    target = _ticket_path(path)
     with cache_lock(target):
         if cache_revision(target) != revision:
             raise CacheChangedError(
@@ -92,10 +97,7 @@ def save_data_if_unchanged(df, revision, *, backup_prefix=None, path=None):
                 f"{target}.bak-{backup_prefix}-{datetime.now(UTC):%Y%m%d-%H%M%S-%f}"
             )
             shutil.copy2(target, backup)
-        if path is None:
-            save_data(df)
-        else:
-            save_data(df, path=target)
+        save_data(df, path=target)
         return backup
 
 
@@ -121,13 +123,14 @@ def drop_obsolete_columns(df):
 
 
 def save_data(df, *, path=None):
-    with cache_lock(path):
-        _save_data_unlocked(df, path=path)
+    target = _ticket_path(path)
+    with cache_lock(target):
+        _save_data_unlocked(df, path=target)
 
 
 def _save_data_unlocked(df, *, path=None):
     df = drop_obsolete_columns(df)
-    path = Path(path or DATA_PATH)
+    path = _ticket_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
@@ -141,7 +144,7 @@ def _save_data_unlocked(df, *, path=None):
 
 
 def load_data(*, path=None):
-    path = Path(path or DATA_PATH)
+    path = _ticket_path(path)
     if path.exists():
         with path.open("rb") as f:
             # bandit B301: DATA_PATH is written by save_data() on this machine,

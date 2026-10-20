@@ -53,13 +53,15 @@ def migrate_categories(frame, *, fetch=fetch_asset_object, workers=4):
 
 def main():
     from data_loading import load_data_snapshot, save_data_if_unchanged
+    from settings import load_settings
 
+    ticket_path = load_settings().paths.tickets
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workers", type=int, default=4)
     args = parser.parse_args()
     if args.workers < 1:
         parser.error("--workers must be positive")
-    frame, revision = load_data_snapshot()
+    frame, revision = load_data_snapshot(path=ticket_path)
     if frame is None or frame.empty:
         print("No cached categories to migrate.")
         return
@@ -71,7 +73,9 @@ def main():
             "failed. Check Assets schema/object-type permissions for the account "
             "configured as JIRA_USERNAME and retry."
         )
-    backup = save_data_if_unchanged(result, revision, backup_prefix="assets")
+    backup = save_data_if_unchanged(
+        result, revision, backup_prefix="assets", path=ticket_path
+    )
     print(f"Cache backup: {backup}")
     print(f"Category migration: {report}")
 

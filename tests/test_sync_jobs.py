@@ -88,7 +88,9 @@ def test_new_shared_run_supersedes_local_pre_admission_failure(
     assert jobs.snapshot()["request"]["projects"] == ["SDEU"]
     if later_state == "interrupted":
         accepted = []
-        monkeypatch.setattr(jobs, "start", lambda saved: accepted.append(saved) or True)
+        monkeypatch.setattr(
+            jobs, "start", lambda saved, **kwargs: accepted.append(saved) or True
+        )
         assert jobs.resume()
         assert accepted[0].projects == ("SDEU",) and accepted[0].resume
 
@@ -101,13 +103,17 @@ def test_killed_process_is_observable_and_its_checkpoint_can_resume(
     code = """import sys,time,json
 from datetime import datetime,UTC
 import data_loading,desk_sync,sync_checkpoints
-data_loading.DATA_PATH=sys.argv[1]
 def fetch(*a,partial_cb,**kwargs):
     partial_cb([json.loads(sys.argv[2])])
     print('checkpoint',flush=True)
     time.sleep(30)
 sync_checkpoints.fetch_jira_issues=fetch
-desk_sync.run_sync(desk_sync.make_sync_request(datetime(2026,9,1,tzinfo=UTC),datetime(2026,9,10,tzinfo=UTC),['SDAX']))
+desk_sync.run_sync(
+    desk_sync.make_sync_request(
+        datetime(2026,9,1,tzinfo=UTC),datetime(2026,9,10,tzinfo=UTC),['SDAX']
+    ),
+    data_path=sys.argv[1],
+)
 """
     process = subprocess.Popen(
         [sys.executable, "-c", code, str(storage), json.dumps(raw())],
@@ -157,8 +163,8 @@ def test_cli_and_both_ui_controls_produce_identical_schema_after_category_retry(
     actual_resolver = category_sync.CategoryResolver
     frames = []
     for adapter in ("sidebar", "custom", "cli"):
-        path = storage.parent / adapter / "cache.pkl"
-        monkeypatch.setattr(data_loading, "DATA_PATH", str(path))
+        path = storage.parent / adapter / "jira_data.pkl"
+        monkeypatch.setenv("DATA_DIR", str(path.parent))
         attempts = {}
 
         def fetch(cloud, workspace, oid, _attempts=attempts):

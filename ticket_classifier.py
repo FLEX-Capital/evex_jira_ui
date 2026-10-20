@@ -35,6 +35,7 @@ import hashlib
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 import openai
 import pandas as pd
@@ -223,7 +224,7 @@ def build_ticket_text(row, max_chars=6000):
     return text
 
 
-def load_cache(cache_path=CACHE_PATH):
+def load_cache(cache_path=None):
     """Return the cached classifications, or an empty frame with the schema."""
     columns = [
         "key",
@@ -240,6 +241,11 @@ def load_cache(cache_path=CACHE_PATH):
         "reasoning_tokens",
         "error",
     ]
+    cache_path = (
+        load_settings().paths.classifications
+        if cache_path is None
+        else Path(cache_path)
+    )
     if os.path.exists(cache_path):
         cached = pd.read_parquet(cache_path)
         for column in columns:
@@ -249,7 +255,12 @@ def load_cache(cache_path=CACHE_PATH):
     return pd.DataFrame(columns=columns)
 
 
-def save_cache(frame, cache_path=CACHE_PATH):
+def save_cache(frame, cache_path=None):
+    cache_path = (
+        load_settings().paths.classifications
+        if cache_path is None
+        else Path(cache_path)
+    )
     os.makedirs(os.path.dirname(cache_path) or ".", exist_ok=True)
     temporary = f"{cache_path}.tmp"
     frame.to_parquet(temporary, index=False)
@@ -339,7 +350,7 @@ def classify_one(client, key, text, model=None):
 
 def classify_tickets(
     df,
-    cache_path=CACHE_PATH,
+    cache_path=None,
     model=None,
     max_workers=8,
     limit=None,
@@ -357,6 +368,11 @@ def classify_tickets(
     ``client`` is built from the environment when omitted; pass one to reuse a
     client across calls or to substitute a double in tests.
     """
+    cache_path = (
+        load_settings().paths.classifications
+        if cache_path is None
+        else Path(cache_path)
+    )
     model = model or resolve_deployment()
     cache = load_cache(cache_path)
     texts = {row["key"]: build_ticket_text(row) for _, row in df.iterrows()}

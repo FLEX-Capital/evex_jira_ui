@@ -3,7 +3,6 @@ from datetime import UTC, date, datetime
 import pytest
 from streamlit.testing.v1 import AppTest
 
-import data_loading
 import sync_jobs
 
 
@@ -34,7 +33,7 @@ class FakeJobs:
 def ui(tmp_path, monkeypatch, public_ui):
     import temporary_history_pull as history
 
-    monkeypatch.setattr(data_loading, "DATA_PATH", str(tmp_path / "cache.pkl"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
     jobs = FakeJobs()
     monkeypatch.setattr(sync_jobs, "JOB", jobs)
     if hasattr(history, "JOB"):

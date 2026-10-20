@@ -23,6 +23,7 @@ from category_sync import (
     unresolved_cells,
 )
 from service_desks import BY_KEY, InvalidIssue
+from settings import load_settings
 
 
 def write_json_atomic(path, value):
@@ -286,7 +287,7 @@ def run_sync(request, *, progress=None, data_path=None):
     from source_sync import refresh_missing_sources
 
     # Freeze paths before handing off a worker; never consult a mutable default later.
-    data_path = Path(data_path or data_loading.DATA_PATH).resolve()
+    data_path = Path(data_path or load_settings().paths.tickets).resolve()
     request = make_sync_request(
         request.start,
         request.end,
@@ -317,6 +318,9 @@ def run_sync(request, *, progress=None, data_path=None):
             baseline, _ = data_loading.load_data_snapshot(path=data_path)
             baseline = baseline if baseline is not None else pd.DataFrame()
             frames, references, failures = [], {}, {}
+            from asset_country import load_cache
+
+            country_cache = load_cache(data_path.parent / "asset_country.json")
             resolver = CategoryResolver()
 
             def invalid_row(event: InvalidIssue) -> None:
@@ -344,7 +348,11 @@ def run_sync(request, *, progress=None, data_path=None):
                     )
                     _seed_category_context(issues, resolver, references)
                     if issues:
-                        frames.append(load_project_issues(project, issues))
+                        frames.append(
+                            load_project_issues(
+                                project, issues, country_cache=country_cache
+                            )
+                        )
                     failures[project] = [
                         i.get("asset_errors", [])
                         for i in issues

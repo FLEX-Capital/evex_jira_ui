@@ -2,7 +2,9 @@ import json
 import re
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
+from enum import Enum
 from functools import cache
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -277,12 +279,16 @@ def dedupe_issues(issues, key_field="key"):
     return list(best.values())
 
 
+class _SaveDefault(Enum):
+    VALUE = 0
+
+
 def fetch_jira_issues(
     start_dt: datetime | None = None,
     end_dt: datetime | None = None,
     max_issues: int = 1000,
     project: str = "SDIPR",
-    save_path: str | None = "data/jira_issues.json",
+    save_path: str | Path | None | _SaveDefault = _SaveDefault.VALUE,
     progress_cb: Callable[[int], None] | None = None,
     partial_cb: Callable[[list[dict[str, Any]]], None] | None = None,
     partial_every: int = 100,
@@ -291,6 +297,8 @@ def fetch_jira_issues(
     invalid_row_cb: Callable[[InvalidIssue], None] | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch a complete desk window, reporting invalid dates without raw values."""
+    if isinstance(save_path, _SaveDefault):
+        save_path = load_settings().paths.raw_snapshot
     if not re.fullmatch(r"[A-Z][A-Z0-9_]*", project):
         raise ValueError("Invalid Jira project key")
     start_dt = effective_start(project, start_dt)
@@ -366,8 +374,6 @@ def fetch_jira_issues(
         partial_cb(unflushed)
     all_issues = dedupe_issues(all_issues)
     if save_path:
-        from pathlib import Path
-
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
         with open(save_path, "w") as f:
             json.dump(all_issues, f)

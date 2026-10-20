@@ -6,6 +6,8 @@ import pandas as pd
 from streamlit.testing.v1 import AppTest
 from ui_env import without_ui_password
 
+from settings import load_settings
+
 
 class CompanyUITests(unittest.TestCase):
     def setUp(self):
@@ -80,7 +82,10 @@ class CountryRefreshUITests(unittest.TestCase):
 
         with (
             patch("data_loading.load_data", return_value=frame),
-            patch("data_loading.save_data", side_effect=lambda d: saved.update(df=d)),
+            patch(
+                "data_loading.save_data",
+                side_effect=lambda d, **kwargs: saved.update(df=d),
+            ),
             patch("asset_country.load_cache", return_value={}),
             patch("asset_country.save_cache", side_effect=lambda cache, **kw: cache),
             patch(
@@ -220,7 +225,9 @@ class StaleCountryRefreshUITests(unittest.TestCase):
             self.assertFalse(app.exception)
             self.assertTrue(any("parallel" in e.value for e in app.error))
             # Resolved lookups are kept so a retry needs no new Assets calls.
-            save.assert_called_once_with(resolved, baseline={})
+            save.assert_called_once_with(
+                resolved, path=load_settings().paths.countries, baseline={}
+            )
             save_tickets.assert_not_called()
 
 
@@ -229,10 +236,9 @@ def test_sidebar_submits_all_desks_despite_company_display_filter(
 ):
     from test_temporary_history_pull import FakeJobs
 
-    import data_loading
     import sync_jobs
 
-    monkeypatch.setattr(data_loading, "DATA_PATH", str(tmp_path / "cache.pkl"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.delenv("UI_PASSWORD", raising=False)
     jobs = FakeJobs()
     monkeypatch.setattr(sync_jobs, "JOB", jobs)

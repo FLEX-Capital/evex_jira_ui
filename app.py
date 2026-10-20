@@ -35,6 +35,7 @@ from service_desks import (
     berlin_day_start,
     filter_companies,
 )
+from settings import load_settings
 from source_sync import refresh_missing_sources
 from styles import CUSTOM_CSS
 from sync_jobs import render_sidebar_refresh
@@ -49,7 +50,8 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 # Sidebar
 # add logo in sidebar
-st.sidebar.image("data/evex_logo.png", width=200)
+paths = load_settings().paths
+st.sidebar.image(str(paths.logo), width=200)
 st.sidebar.header("\n\nJIRA Data Analysis")
 
 # Require password before showing any data/controls (set UI_PASSWORD to enable).
@@ -62,7 +64,7 @@ selected_companies = st.sidebar.multiselect(
 
 cache_revision = None
 try:
-    df_old, cache_revision = load_data_snapshot()
+    df_old, cache_revision = load_data_snapshot(path=paths.tickets)
     df = df_old.copy()
     # make sure column clone_in_project is there
     if "clone_in_project" not in df.columns:
@@ -70,7 +72,7 @@ try:
 except Exception:  # noqa: BLE001 - allow an unavailable legacy cache
     df = pd.DataFrame()
     df_old = pd.DataFrame()
-    cache_revision = current_cache_revision()
+    cache_revision = current_cache_revision(paths.tickets)
 
 st.session_state["_sync_seen_revision"] = cache_revision
 
@@ -778,9 +780,9 @@ with tab_interactive:
     if refresh_sources:
         try:
             with st.spinner("Fehlende Ursprünge werden mit Jira abgeglichen …"):
-                cached_df, revision = load_data_snapshot()
+                cached_df, revision = load_data_snapshot(path=paths.tickets)
                 cached_df, sources_updated = refresh_missing_sources(cached_df)
-                save_data_if_unchanged(cached_df, revision)
+                save_data_if_unchanged(cached_df, revision, path=paths.tickets)
             st.session_state["source_sync_success"] = sources_updated
         except Exception as exc:  # noqa: BLE001 - report optional/isolated failures
             st.error(f"Ursprung-Abgleich fehlgeschlagen: {exc}")
@@ -793,27 +795,29 @@ with tab_interactive:
             # current window still needs its Land, and rewriting only the
             # visible rows would leave the rest stale.
             with st.spinner("Assets werden aufgelöst und Länder neu zugeordnet …"):
-                cached_df, revision = load_data_snapshot()
+                cached_df, revision = load_data_snapshot(path=paths.tickets)
                 before = (
                     cached_df["Land"]
                     if "Land" in cached_df.columns
                     else pd.Series(index=cached_df.index, dtype="object")
                 )
-                country_baseline = load_country_cache()
+                country_baseline = load_country_cache(path=paths.countries)
                 cached_df, cache, stats = refresh_countries(
-                    cached_df, cache=country_baseline
+                    cached_df, cache=country_baseline, cache_path=paths.countries
                 )
                 # Asset countries do not depend on the ticket cache, and save_cache
                 # merges into the latest mapping, so keep them even if the ticket
                 # cache changed meanwhile; a retry then needs no new lookups.
-                cache = save_cache(cache, baseline=country_baseline)
-                with cache_lock():
-                    if current_cache_revision() != revision:
+                cache = save_cache(
+                    cache, path=paths.countries, baseline=country_baseline
+                )
+                with cache_lock(paths.tickets):
+                    if current_cache_revision(paths.tickets) != revision:
                         raise CacheChangedError(
                             "Cache wurde parallel geändert; bitte die Aktualisierung wiederholen."
                         )
                     cached_df = attach_country(cached_df, cache)
-                    save_data_if_unchanged(cached_df, revision)
+                    save_data_if_unchanged(cached_df, revision, path=paths.tickets)
             stats["rows"] = int((cached_df["Land"] != before).sum())
             stats["pending"] = int((cached_df["Land"] == NOT_RESOLVED).sum())
             st.session_state["country_sync_success"] = stats

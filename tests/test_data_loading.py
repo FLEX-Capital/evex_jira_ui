@@ -1,4 +1,5 @@
 import multiprocessing
+import os
 import tempfile
 import threading
 import unittest
@@ -8,12 +9,12 @@ from unittest.mock import patch
 import pandas as pd
 
 import data_loading
+from settings import load_settings
 
 
 def _write_from_another_process(path, entered, done):
-    data_loading.DATA_PATH = path
     entered.set()
-    data_loading.save_data(pd.DataFrame({"key": ["CLI-1"]}))
+    data_loading.save_data(pd.DataFrame({"key": ["CLI-1"]}), path=path)
     done.set()
 
 
@@ -23,11 +24,11 @@ class PersistenceTests(unittest.TestCase):
         entered, done = context.Event(), context.Event()
         with (
             tempfile.TemporaryDirectory() as tmp,
-            patch.object(data_loading, "DATA_PATH", str(Path(tmp) / "cache.pkl")),
+            patch.dict(os.environ, {"DATA_DIR": tmp}),
         ):
             child = context.Process(
                 target=_write_from_another_process,
-                args=(data_loading.DATA_PATH, entered, done),
+                args=(load_settings().paths.tickets, entered, done),
             )
             try:
                 with data_loading.cache_lock():
@@ -45,7 +46,7 @@ class PersistenceTests(unittest.TestCase):
     def test_stale_snapshot_cannot_overwrite_a_later_save(self):
         with (
             tempfile.TemporaryDirectory() as tmp,
-            patch.object(data_loading, "DATA_PATH", str(Path(tmp) / "cache.pkl")),
+            patch.dict(os.environ, {"DATA_DIR": tmp}),
         ):
             data_loading.save_data(pd.DataFrame({"key": ["SDAX-1"]}))
             snapshot, revision = data_loading.load_data_snapshot()
@@ -60,7 +61,7 @@ class PersistenceTests(unittest.TestCase):
         entered, done = threading.Event(), threading.Event()
         with (
             tempfile.TemporaryDirectory() as tmp,
-            patch.object(data_loading, "DATA_PATH", str(Path(tmp) / "cache.pkl")),
+            patch.dict(os.environ, {"DATA_DIR": tmp}),
         ):
 
             def writer():
@@ -82,10 +83,10 @@ class PersistenceTests(unittest.TestCase):
     def test_failed_serialization_keeps_previous_cache(self):
         with (
             tempfile.TemporaryDirectory() as tmp,
-            patch.object(data_loading, "DATA_PATH", str(Path(tmp) / "cache.pkl")),
+            patch.dict(os.environ, {"DATA_DIR": tmp}),
         ):
             data_loading.save_data(pd.DataFrame({"key": ["SDAX-1"]}))
-            previous = Path(data_loading.DATA_PATH).read_bytes()
+            previous = Path(load_settings().paths.tickets).read_bytes()
             with (
                 patch.object(
                     data_loading.pickle,
@@ -95,7 +96,7 @@ class PersistenceTests(unittest.TestCase):
                 self.assertRaises(RuntimeError),
             ):
                 data_loading.save_data(pd.DataFrame())
-            self.assertEqual(Path(data_loading.DATA_PATH).read_bytes(), previous)
+            self.assertEqual(Path(load_settings().paths.tickets).read_bytes(), previous)
 
 
 if __name__ == "__main__":

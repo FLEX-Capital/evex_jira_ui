@@ -5,12 +5,14 @@ import os
 import threading
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import streamlit as st
 
 import data_loading
-from desk_sync import make_sync_request, run_sync, status_path
+from desk_sync import SyncRequest, make_sync_request, run_sync, status_path
 from service_desks import BY_KEY
+from settings import load_settings
 from ui_auth import require_current_session
 
 
@@ -22,13 +24,19 @@ def _status_revision(data_path):
 
 
 class SyncJobs:
-    def __init__(self):
-        self.lock = threading.Lock()
-        self.thread = None
-        self.failure = None
+    """Own background admission, captured paths and durable status observation."""
 
-    def start(self, request):
-        data_path = Path(data_loading.DATA_PATH).resolve()
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.thread: threading.Thread | None = None
+        self.failure: tuple[Path, object, dict[str, Any]] | None = None
+        self.data_path: Path | None = None
+
+    def start(
+        self, request: SyncRequest, *, data_path: str | Path | None = None
+    ) -> bool:
+        """Admit an import with paths frozen before its worker is launched."""
+        data_path = Path(data_path or load_settings().paths.tickets).resolve()
         admitted = threading.Event()
         accepted = []
         observed_revision = _status_revision(data_path)
@@ -69,6 +77,7 @@ class SyncJobs:
             if self.thread is not None and self.thread.is_alive():
                 return False
             self.failure = None
+            self.data_path = data_path
             self.thread = threading.Thread(target=work, daemon=True)
             self.thread.start()
         # No network occurs before admission. A competing CLI/UI reports rejection.
@@ -76,7 +85,7 @@ class SyncJobs:
         return bool(accepted)
 
     def snapshot(self):
-        path = Path(data_loading.DATA_PATH).resolve()
+        path = self.data_path or load_settings().paths.tickets
         revision = None
         try:
             with status_path(path).open() as handle:
@@ -125,7 +134,12 @@ class SyncJobs:
             saved["start"] = datetime.fromisoformat(saved["start"])
             saved["end"] = datetime.fromisoformat(saved["end"])
             saved["resume"] = True
-            return self.start(make_sync_request(**saved))
+            request = make_sync_request(**saved)
+            return (
+                self.start(request, data_path=self.data_path)
+                if self.data_path is not None
+                else self.start(request)
+            )
         except (ValueError, TypeError, KeyError):
             return False
 

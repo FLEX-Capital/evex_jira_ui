@@ -1,6 +1,8 @@
 import json
+from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import time
+from typing import Any
 
 import holidays
 import numpy as np
@@ -244,7 +246,7 @@ def business_seconds_between(start: pd.Timestamp,
     return total"""
 
 # read object_id_to_name from json file
-with open("data/object_id_to_name.json", "r") as f:
+with load_settings().paths.category_map.open() as f:
     object_id_to_name = json.load(f)
 
 
@@ -475,6 +477,7 @@ def _load_service_desk_issues(
     clone_project=None,
     clone_of_clone_project=None,
     comment_separator="\n--------------------------------\n",
+    country_cache=None,
 ):
     rows = [_extract_issue(issue, comment_separator) for issue in (issues or [])]
     df = pd.DataFrame(
@@ -494,7 +497,7 @@ def _load_service_desk_issues(
     # a pure cache lookup - no Assets API call, no credentials. Ids the cache
     # has not seen become NOT_RESOLVED rather than silently claiming the asset
     # carries no country; backfill_country.py resolves them.
-    df = attach_country(df, load_cache())
+    df = attach_country(df, load_cache() if country_cache is None else country_cache)
     df["firma"] = firma
     df["clone_in_project"] = df["clones"].apply(
         lambda value: (
@@ -516,29 +519,54 @@ def _load_service_desk_issues(
     return df[["firma", *[column for column in df.columns if column != "firma"]]]
 
 
-def load_issues(issues):
+def load_issues(
+    issues: list[dict[str, Any]] | None,
+    *,
+    country_cache: Mapping[str, str | None] | None = None,
+) -> pd.DataFrame:
+    """Transform this desk using supplied country evidence when available."""
     return _load_service_desk_issues(
         issues,
         firma="IPRO",
+        country_cache=country_cache,
         clone_project="EXIPR",
         comment_separator="\n\n",
     )
 
 
-def load_issues_Amparex(issues):
+def load_issues_Amparex(
+    issues: list[dict[str, Any]] | None,
+    *,
+    country_cache: Mapping[str, str | None] | None = None,
+) -> pd.DataFrame:
+    """Transform this desk using supplied country evidence when available."""
     return _load_service_desk_issues(
         issues,
         firma="Amparex",
+        country_cache=country_cache,
         clone_project="EXAX",
         clone_of_clone_project="AX",
     )
 
 
-def load_issues_Euronet(issues):
-    return _load_service_desk_issues(issues, firma="Euronet")
+def load_issues_Euronet(
+    issues: list[dict[str, Any]] | None,
+    *,
+    country_cache: Mapping[str, str | None] | None = None,
+) -> pd.DataFrame:
+    """Transform this desk using supplied country evidence when available."""
+    return _load_service_desk_issues(
+        issues, firma="Euronet", country_cache=country_cache
+    )
 
 
-def load_project_issues(project, issues):
+def load_project_issues(
+    project: str,
+    issues: list[dict[str, Any]] | None,
+    *,
+    country_cache: Mapping[str, str | None] | None = None,
+) -> pd.DataFrame:
+    """Dispatch desk transformation with explicitly captured country evidence."""
     project_key = str(project).upper()
     loaders = {
         "SDIPR": load_issues,
@@ -549,7 +577,7 @@ def load_project_issues(project, issues):
         loader = loaders[project_key]
     except KeyError as exc:
         raise ValueError(f"Unsupported Jira project: {project}") from exc
-    return loader(issues)
+    return loader(issues, country_cache=country_cache)
 
 
 def _normalize_bool_columns(df):
