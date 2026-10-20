@@ -6,27 +6,36 @@ Customer/branch columns are reference IDs, not enriched customer records.
 """
 
 import argparse
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from typing import Any
 
+import pandas as pd
 import requests
 
 from jira_loader import fetch_asset_object
-from settings import load_settings
+from settings import Settings, load_settings
 
 
-def migrate_categories(frame, *, fetch=None, workers=4, settings=None):
+def migrate_categories(
+    frame: pd.DataFrame,
+    *,
+    fetch: Callable[[str, str, str], Mapping[str, Any]] | None = None,
+    workers: int = 4,
+    settings: Settings | None = None,
+) -> tuple[pd.DataFrame, dict[str, int]]:
     """Resolve legacy category labels on a copy using the captured tenant."""
     config = settings or load_settings()
     tenant = config.tenant
     fetch = fetch or partial(fetch_asset_object, settings=config)
     result = frame.copy()
-    ids = set()
+    ids: set[str] = set()
     for column in ("main_category_id", "sub_category_id"):
         ids.update(result[column].fillna("").astype(str))
     ids.discard("")
 
-    def resolve(oid):
+    def resolve(oid: str) -> tuple[str, Any, str]:
         try:
             asset = fetch(tenant.cloud_id, tenant.workspace_id, oid)
             if str(asset.get("id")) != oid:
@@ -55,7 +64,7 @@ def migrate_categories(frame, *, fetch=None, workers=4, settings=None):
     }
 
 
-def main():
+def main() -> None:
     """Run the explicit category migration with revision protection and backup."""
     from data_loading import load_data_snapshot, save_data_if_unchanged
 

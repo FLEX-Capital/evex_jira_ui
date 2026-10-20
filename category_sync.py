@@ -1,7 +1,7 @@
 """Resolve category labels and prepare identity-checked, narrow cache repairs."""
 
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
@@ -18,20 +18,22 @@ CATEGORY_FIELDS = desks.category_fields()
 UNASSIGNED = "Nicht zugeordnet"
 
 
-def text_value(value):
+def text_value(value: Any) -> str:
     """Normalize a scalar category cell into trimmed text."""
     return "" if value is None or pd.isna(value) else str(value).strip()
 
 
-def unknown(value):
+def unknown(value: Any) -> bool:
     """Recognize the documented empty or unknown category labels."""
     return text_value(value).casefold() in {"", "unknown", "unbekannt"}
 
 
-def timestamp(value):
+def timestamp(value: str | datetime | None) -> pd.Timestamp | None:
     """Normalize a comparison timestamp into an aware UTC value."""
-    value = pd.to_datetime(value, errors="coerce", utc=True)
-    return None if pd.isna(value) else value
+    if value is None:
+        return None
+    stamp = pd.to_datetime(value, errors="coerce", utc=True)
+    return None if pd.isna(stamp) else stamp
 
 
 @dataclass(frozen=True)
@@ -60,7 +62,7 @@ class CategoryResolver:
         self.now = now or (lambda: datetime.now(UTC))
         self.results: dict[tuple[str, str, str], CategoryLookup] = {}
 
-    def resolve(self, cloud_id, workspace_id, object_id):
+    def resolve(self, cloud_id: str, workspace_id: str, object_id: str) -> CategoryLookup:
         """Resolve one captured tenant identity, reusing this operation's lookup result."""
         identity = (cloud_id, workspace_id, str(object_id))
         if identity in self.results:
@@ -98,7 +100,9 @@ class CategoryResolver:
         return result
 
 
-def fetch_category_references(keys, *, settings=None):
+def fetch_category_references(
+    keys: Sequence[str], *, settings: Settings | None = None
+) -> dict[str, dict[str, Any]]:
     """Fetch the category fields needed for explicit repair of selected ticket keys."""
     from source_sync import fetch_issue_fields
 
@@ -129,13 +133,18 @@ class CategoryRepairReport:
     repaired_cells: int = 0
     unassigned_cells: int = 0
     unresolved_cells: int = 0
-    failed_objects: dict = field(default_factory=dict)
+    failed_objects: dict[str, str] = field(default_factory=dict)
     skipped_cells: int = 0
 
 
 def prepare_category_repairs(
-    frame, *, references=None, resolver=None, reference_loader=None, settings=None
-):
+    frame: pd.DataFrame,
+    *,
+    references: Mapping[str, Mapping[str, Any]] | None = None,
+    resolver: CategoryResolver | None = None,
+    reference_loader: Callable[[Sequence[str]], Mapping[str, Mapping[str, Any]]] | None = None,
+    settings: Settings | None = None,
+) -> tuple[list[CategoryPatch], CategoryRepairReport]:
     """Prepare category patches from captured rows without holding ticket-cache locks."""
     config = settings or getattr(resolver, "settings", None) or load_settings()
     tenant = config.tenant
@@ -169,7 +178,9 @@ def prepare_category_repairs(
         fields = references.get(key, {})
         refs = fields.get(raw_field)
         error = None
-        oid, workspace, label = "", "", None
+        oid = ""
+        workspace: str | None = ""
+        label: str | None = None
         if raw_field not in fields:
             error = reference_error
         elif refs is None or refs == []:
@@ -184,10 +195,10 @@ def prepare_category_repairs(
             else:
                 lookup = resolver.resolve(tenant.cloud_id, workspace, oid)
                 label, error = lookup.label, lookup.error
-        if error:
+        if error or label is None:
             report.unresolved_cells += 1
             identity = f"{tenant.cloud_id}/{workspace}/{oid}" if oid else f"{key}/{raw_field}"
-            report.failed_objects[identity] = error
+            report.failed_objects[identity] = error or "empty_category_label"
             continue
         patches.append(
             CategoryPatch(
@@ -209,7 +220,9 @@ def prepare_category_repairs(
     return patches, report
 
 
-def apply_category_repairs(current, patches):
+def apply_category_repairs(
+    current: pd.DataFrame, patches: Sequence[CategoryPatch]
+) -> tuple[pd.DataFrame, int]:
     """Apply only patches whose original ticket/reference values still match."""
     result = current.copy()
     skipped = 0
@@ -241,7 +254,7 @@ def apply_category_repairs(current, patches):
     return result, skipped
 
 
-def unresolved_cells(frame):
+def unresolved_cells(frame: pd.DataFrame) -> int:
     """Count unresolved category labels across the shared field registry."""
     return sum(
         int(frame[label].map(unknown).sum())

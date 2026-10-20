@@ -1,6 +1,7 @@
 """Pure normalization and validation for trusted local ticket DataFrames."""
 
 from functools import lru_cache
+from typing import Any, cast
 
 import pandas as pd
 
@@ -40,7 +41,7 @@ class CacheReadError(RuntimeError):
 
 
 def _missing(value: object) -> bool:
-    return bool(pd.api.types.is_scalar(value) and pd.isna(value))
+    return bool(pd.api.types.is_scalar(value) and pd.isna(cast(Any, value)))
 
 
 def _valid_list(column: str, value: object) -> bool:
@@ -95,7 +96,7 @@ def _empty_schema() -> pd.DataFrame:
         result[column] = pd.Series(dtype="boolean")
     for column in _COUNTS:
         result[column] = pd.Series(dtype="Int64")
-    for column in result:
+    for column in cast(list[str], result.columns.tolist()):
         if column in _LISTS:
             result[column] = pd.Series(dtype="object")
         elif column not in (*_DATES, *_BOOLS, *_COUNTS) and not (
@@ -108,11 +109,13 @@ def _empty_schema() -> pd.DataFrame:
 
 def _validate(frame: pd.DataFrame) -> None:
     template = _empty_schema()
-    missing = tuple(column for column in template if column not in frame)
+    missing = tuple(
+        column for column in cast(list[str], template.columns.tolist()) if column not in frame
+    )
     if missing:
         raise CacheSchemaError("missing_columns", missing)
     invalid = []
-    for column in template:
+    for column in cast(list[str], template.columns.tolist()):
         values = frame[column]
         if column in _DATES:
             valid = isinstance(values.dtype, pd.DatetimeTZDtype)
@@ -178,7 +181,7 @@ def normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
     template = _empty_schema()
     if result.empty:
-        for column in template:
+        for column in cast(list[str], template.columns.tolist()):
             result[column] = template[column].copy()
     else:
         result = result.reset_index(drop=True)
@@ -194,7 +197,7 @@ def normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
         result = result.iloc[order].drop_duplicates("key", keep="last")
         result = result.sort_index(kind="stable").reset_index(drop=True)
         result = enrich_jira_time_metrics(result)
-        for column in template:
+        for column in cast(list[str], template.columns.tolist()):
             if column not in result:
                 result[column] = pd.Series(index=result.index, dtype=template[column].dtype)
         countries = attach_country(result, {})

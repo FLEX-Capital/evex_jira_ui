@@ -22,23 +22,8 @@ runtimes:
 # This is the section where you manage your linters.
 # (https://docs.trunk.io/check/configuration)
 lint:
-  definitions:
-    # Same pinned mypy flags/targets; one graph for the batch instead of per-file repeats.
-    - name: mypy
-      commands:
-        - name: lint
-          version: <1.20.0
-          output: mypy
-          run: >-
-            mypy --ignore-missing-imports --follow-imports=silent --show-error-codes
-            --show-column-numbers ${target}
-          run_from: ${root_or_parent_with_any_config}
-          batch: true
-          success_codes: [0, 1]
-          stdin: false
   enabled:
     - actionlint@1.7.12
-    - mypy@1.13.0
     - yamllint@1.38.0
     - bandit@1.9.4
     - checkov@3.3.29
@@ -58,7 +43,7 @@ lint:
     - linters: [ruff]
       paths: ["**/*.ipynb"]
     # Unsupported historical source; the separate notebook output guard still applies.
-    - linters: [ruff, black, isort, mypy]
+    - linters: [ruff]
       paths: [analysis/archive/**]
     - linters:
         - bandit
@@ -69,7 +54,7 @@ actions:
     - id: python-quality
       display_name: Native Python Quality
       description: Check index source/config with locked native Ruff and notebook output policy
-      run: .venv/bin/python tools/check_python.py --staged --index-file '${env.GIT_INDEX_FILE}'
+      run: .venv/bin/python tools/check_python.py --staged --types --index-file '${env.GIT_INDEX_FILE}'
       triggers:
         - git_hooks: [pre-commit, pre-push]
   disabled:

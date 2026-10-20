@@ -3,7 +3,9 @@
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, fields
 from datetime import UTC, date, datetime, time
-from typing import Any, Literal
+from typing import Any, Literal, overload
+
+import pandas as pd
 
 from reporting_policy import BERLIN
 
@@ -83,7 +85,7 @@ def category_fields() -> tuple[tuple[str, str, str], ...]:
     )
 
 
-def selected_projects(projects=None):
+def selected_projects(projects: Iterable[str] | None = None) -> tuple[str, ...]:
     """Known desks in the given order without duplicates; all desks when None."""
     projects = tuple(dict.fromkeys(BY_KEY if projects is None else projects))
     if not projects or any(project not in BY_KEY for project in projects):
@@ -91,24 +93,32 @@ def selected_projects(projects=None):
     return projects
 
 
-def berlin_day_start(day):
+def berlin_day_start(day: date) -> datetime:
     """Return the first instant of a Berlin calendar day."""
     return datetime.combine(day, time.min, tzinfo=BERLIN)
 
 
-def berlin_day_end(day):
+def berlin_day_end(day: date) -> datetime:
     """Last instant of a Berlin calendar day, so a picked end day counts fully."""
     return datetime.combine(day, time.max, tzinfo=BERLIN)
 
 
-def as_utc(value):
+def as_utc(value: datetime) -> datetime:
     """Treat legacy naive CLI timestamps as Berlin dates, then normalize."""
     if value.tzinfo is None:
         value = value.replace(tzinfo=BERLIN)
     return value.astimezone(UTC)
 
 
-def effective_start(project, start):
+@overload
+def effective_start(project: str, start: datetime) -> datetime: ...
+
+
+@overload
+def effective_start(project: str, start: None) -> datetime | None: ...
+
+
+def effective_start(project: str, start: datetime | None) -> datetime | None:
     """Apply the selected desk's earliest supported creation date to the UTC window."""
     start = as_utc(start) if start is not None else None
     desk = BY_KEY.get(project)
@@ -116,7 +126,7 @@ def effective_start(project, start):
     return max(start, cutoff) if start and cutoff else start or cutoff
 
 
-def filter_companies(frame, labels):
+def filter_companies(frame: pd.DataFrame, labels: Iterable[str]) -> pd.DataFrame:
     """Select the companies belonging to the chosen service-desk labels."""
     companies = [desk.company for desk in DESKS if desk.label in labels]
     return frame.loc[frame["firma"].isin(companies)].copy()

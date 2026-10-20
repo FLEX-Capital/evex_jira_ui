@@ -2,17 +2,26 @@
 
 import re
 import time
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+import pandas as pd
 import requests
 
 import service_desks as desks
 from http_policy import SOURCE, InvalidSearchPayload, validate_search_page, with_retries
-from settings import load_settings
+from settings import Settings, load_settings
 
 
-def fetch_issue_fields(keys, fields, *, settings=None, now=None, sleep=None):
+def fetch_issue_fields(
+    keys: Sequence[str],
+    fields: Sequence[str],
+    *,
+    settings: Settings | None = None,
+    now: Callable[[], datetime] | None = None,
+    sleep: Callable[[float], None] | None = None,
+) -> dict[str, dict[str, Any]]:
     """Batch-read selected fields; omitted issues/fields stay distinguishable."""
     keys = list(dict.fromkeys(keys))
     if not keys:
@@ -64,7 +73,7 @@ def fetch_issue_fields(keys, fields, *, settings=None, now=None, sleep=None):
     return results
 
 
-def fetch_issue_sources(keys, *, settings=None):
+def fetch_issue_sources(keys: Sequence[str], *, settings: Settings | None = None) -> dict[str, Any]:
     """Read just the source field, leaving absent/inaccessible issues untouched."""
     return {
         key: (fields[desks.FIELDS.source] or {}).get("value", "")
@@ -75,7 +84,10 @@ def fetch_issue_sources(keys, *, settings=None):
     }
 
 
-def refresh_missing_sources(df, fetch_sources=fetch_issue_sources):
+def refresh_missing_sources(
+    df: pd.DataFrame,
+    fetch_sources: Callable[[Sequence[str]], Mapping[str, Any]] = fetch_issue_sources,
+) -> tuple[pd.DataFrame, int]:
     """Fill cached blanks from Jira, preserving existing values and other fields."""
     result = df.copy()
     if result.empty:

@@ -115,7 +115,10 @@ def apply_migration(plan: MigrationPlan) -> Path | None:
             raise CacheChangedError("migration_plan_mismatch")
         # The public loader also validates tenant ownership. Do this before any
         # backup, including explicit nondefault-tenant legacy rejection.
-        normalized = load_data(path=plan.path, settings=config)
+        loaded = load_data(path=plan.path, settings=config)
+        if loaded is None:
+            raise CacheChangedError("cache_missing_after_capture")
+        normalized = loaded
         if plan.source_version == CURRENT_TICKET_SCHEMA:
             return None
         backup = plan.path.with_name(
@@ -356,6 +359,7 @@ def apply_cleanup(plan: CleanupPlan, paths: DataPaths, *, now: datetime) -> tupl
 
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> Never:
+        """Reject invalid CLI arguments without echoing their values."""
         raise ValueError("invalid_arguments")
 
 

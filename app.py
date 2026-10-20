@@ -61,8 +61,8 @@ st.session_state["_sync_seen_revision"] = cache_revision
 # Optional global filters in sidebar.
 # `now` must be Berlin-local, not UTC: between 00:00 and 02:00 Berlin the UTC date
 # is still the previous day, which silently shifted the default window back a day.
-start_date = datetime.now(BERLIN) - timedelta(days=7)
-end_date = datetime.now(BERLIN)
+start_date = (datetime.now(BERLIN) - timedelta(days=7)).date()
+end_date = datetime.now(BERLIN).date()
 picked = st.sidebar.date_input(
     "Zeitraum (erstellt)", value=(start_date, end_date), min_value=EARLIEST_DAY
 )
@@ -75,7 +75,7 @@ if len(picked) == 2:
     start_date, end_date = picked
     st.session_state["date_range"] = (start_date, end_date)
 else:
-    start_date, end_date = st.session_state.get("date_range", (start_date.date(), end_date.date()))
+    start_date, end_date = st.session_state.get("date_range", (start_date, end_date))
     st.sidebar.info("Bitte Enddatum wählen.")
 
 # The picked day must span 00:00-23:59:59 Berlin. Building these in UTC shifted the

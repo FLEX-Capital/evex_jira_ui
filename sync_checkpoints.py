@@ -6,7 +6,9 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
+from category_sync import CategoryResolver
 from file_io import write_json_atomic
 from jira_loader import dedupe_issues, enrich_issue_assets, fetch_jira_issues
 from service_desks import InvalidIssue, as_utc, effective_start, filter_issue_window
@@ -31,13 +33,13 @@ class CheckpointStore:
         self.progress = progress
         self.fetch_jira_issues = fetch_jira_issues
 
-    def _say(self, message, **kwargs):
+    def _say(self, message: str, **kwargs: Any) -> None:
         if self.progress:
             self.progress(message)
         else:
             print(message, **kwargs)
 
-    def _partial_paths(self, project):
+    def _partial_paths(self, project: str) -> tuple[str, str]:
         """Partial-log paths, derived from the checkpoint path rather than declared.
 
         Partial progress within a single fetch. The completed checkpoint is one JSON
@@ -54,7 +56,9 @@ class CheckpointStore:
         stem = base.removesuffix(".json")
         return (f"{stem}.partial.ndjson", f"{stem}.partial.json")
 
-    def begin_partial(self, project, start_dt, end_dt):
+    def begin_partial(
+        self, project: str, start_dt: datetime, end_dt: datetime
+    ) -> Callable[[list[dict[str, Any]]], None]:
         """Start a fresh partial log, returning an appender for fetch_jira_issues.
 
         The metadata is written first and separately: a partial log is only safe to
@@ -64,7 +68,7 @@ class CheckpointStore:
         log_path, meta_path = self._partial_paths(project)
         os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
         write_json_atomic(
-            meta_path,
+            Path(meta_path),
             {
                 "version": 1,
                 "project": project,
@@ -76,7 +80,7 @@ class CheckpointStore:
         )
         open(log_path, "w").close()
 
-        def append(issues):
+        def append(issues: list[dict[str, Any]]) -> None:
             with open(log_path, "a") as handle:
                 handle.writelines(json.dumps(issue) + "\n" for issue in issues)
                 handle.flush()
@@ -85,7 +89,7 @@ class CheckpointStore:
 
         return append
 
-    def _reopen_partial(self, project):
+    def _reopen_partial(self, project: str) -> Callable[[list[dict[str, Any]]], None]:
         """Appender for a partial log that already exists, leaving its lines intact."""
         log_path, _ = self._partial_paths(project)
         # A new append must not follow a torn JSON fragment or concatenate with
@@ -112,7 +116,7 @@ class CheckpointStore:
             handle.flush()
             os.fsync(handle.fileno())
 
-        def append(issues):
+        def append(issues: list[dict[str, Any]]) -> None:
             with open(log_path, "a") as handle:
                 handle.writelines(json.dumps(issue) + "\n" for issue in issues)
                 handle.flush()
@@ -121,7 +125,13 @@ class CheckpointStore:
 
         return append
 
-    def load_partial(self, project, start_dt, *, invalid_row_cb=None):
+    def load_partial(
+        self,
+        project: str,
+        start_dt: datetime,
+        *,
+        invalid_row_cb: Callable[[InvalidIssue], None] | None = None,
+    ) -> tuple[list[dict[str, Any]], datetime | None, datetime | None]:
         """Return (issues, oldest_created, logged_end) from a resumable partial log.
 
         Returns ([], None, None) when there is nothing to resume. A log from another
@@ -160,23 +170,23 @@ class CheckpointStore:
         oldest = min(as_utc(datetime.fromisoformat(issue["fields"]["created"])) for issue in issues)
         return (issues, oldest, as_utc(datetime.fromisoformat(meta["end"])))
 
-    def clear_partial(self, project):
+    def clear_partial(self, project: str) -> None:
         """Remove only this project's partial checkpoint artifacts."""
         for path in self._partial_paths(project):
             if os.path.exists(path):
                 os.unlink(path)
 
-    def _fmt_duration(self, seconds):
+    def _fmt_duration(self, seconds: float) -> str:
         seconds = int(seconds)
         h, rem = divmod(seconds, 3600)
         m, s = divmod(rem, 60)
         return f"{h}h{m:02d}m" if h else f"{m}m{s:02d}s"
 
-    def _make_progress(self, project, started):
+    def _make_progress(self, project: str, started: float) -> Callable[[int], None]:
         """Print a one-line progress update per fetched page."""
         state = {"last": 0.0}
 
-        def report(count):
+        def report(count: int) -> None:
             now = time.time()
             if now - state["last"] < 5:
                 return
@@ -195,14 +205,14 @@ class CheckpointStore:
 
     def fetch_project(
         self,
-        project,
-        start_dt,
-        end_dt,
-        resume,
+        project: str,
+        start_dt: datetime,
+        end_dt: datetime,
+        resume: bool,
         *,
-        category_resolver=None,
-        invalid_row_cb=None,
-    ):
+        category_resolver: CategoryResolver | None = None,
+        invalid_row_cb: Callable[[InvalidIssue], None] | None = None,
+    ) -> list[dict[str, Any]]:
         """Fetch one project's issues, using/creating a raw checkpoint file."""
         start_dt = effective_start(project, start_dt)
         end_dt = as_utc(end_dt)
@@ -263,12 +273,16 @@ class CheckpointStore:
                         )
                 retry_incomplete = bool(saved.get("invalid_rows", 0))
                 fetch_start = max(start_dt, saved_end)
-        partial, oldest_partial, partial_end = ([], None, None)
+        partial: list[dict[str, Any]] = []
+        coverage: tuple[datetime, datetime] | None = None
         if resume:
             partial, oldest_partial, partial_end = self.load_partial(
                 project, start_dt, invalid_row_cb=record_invalid
             )
             if partial:
+                if oldest_partial is None or partial_end is None:
+                    raise ValueError("invalid_partial_coverage")
+                coverage = oldest_partial, partial_end
                 self._say(
                     (
                         f"[{project}] resuming: {len(partial)} issues already saved, "
@@ -280,12 +294,13 @@ class CheckpointStore:
             # Rejected records have no trustworthy creation time. Retry the
             # entire requested coverage rather than claiming a complete tail.
             fetch_start = start_dt
-            oldest_partial = None
+            coverage = None
         started = time.time()
         windows = []
-        if oldest_partial is None:
+        if coverage is None:
             windows.append((fetch_start, end_dt))
         else:
+            oldest_partial, partial_end = coverage
             if fetch_start < oldest_partial:
                 windows.append((fetch_start, oldest_partial))
             if fetch_start > oldest_partial:
@@ -324,7 +339,7 @@ class CheckpointStore:
             project, issues, start_dt, end_dt, invalid_row_cb=record_invalid
         )
         write_json_atomic(
-            checkpoint,
+            Path(checkpoint),
             {
                 "version": 2,
                 "project": project,
@@ -342,17 +357,17 @@ class CheckpointStore:
 
 
 def fetch_project(
-    project,
-    start_dt,
-    end_dt,
-    resume,
+    project: str,
+    start_dt: datetime,
+    end_dt: datetime,
+    resume: bool,
     *,
-    checkpoint_dir=None,
-    category_resolver=None,
-    progress=None,
-    invalid_row_cb=None,
-    settings=None,
-):
+    checkpoint_dir: str | Path | None = None,
+    category_resolver: CategoryResolver | None = None,
+    progress: Callable[[str], None] | None = None,
+    invalid_row_cb: Callable[[InvalidIssue], None] | None = None,
+    settings: Settings | None = None,
+) -> list[dict[str, Any]]:
     """Fetch or resume one selected project through a checkpoint store."""
     return CheckpointStore(checkpoint_dir, progress=progress, settings=settings).fetch_project(
         project,

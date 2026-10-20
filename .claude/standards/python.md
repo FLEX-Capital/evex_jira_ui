@@ -7,7 +7,7 @@
 | `uv`     | Package management            | `uv add <pkg>`, `uv sync`                                      |
 | `pytest` | Testing                       | `uv run pytest`                                                |
 | `ruff`   | Linting and formatting        | `uv run --frozen --no-sync python tools/check_python.py --all` |
-| `mypy`   | Type checking (required)      | via `trunk check`                                              |
+| `mypy`   | Type checking (required)      | `uv run --frozen --no-sync mypy`                               |
 | `trunk`  | Orchestrates all of the above | `trunk fmt && trunk check`                                     |
 
 Never use `pip install` directly — always `uv add`.
@@ -15,7 +15,7 @@ Never use `pip install` directly — always `uv add`.
 ## Style
 
 - Line length: **100 characters**
-- Ruff alone owns Python formatting and import order. Run `uv run --frozen --no-sync ruff format .` to format, then `uv run --frozen --no-sync python tools/check_python.py --all` to check. Commit and push hooks check isolated index bytes/config; Trunk retains non-Python gates. Historical archive source is excluded from lint but every tracked notebook obeys the output guard.
+- Ruff alone owns Python formatting and import order. Run `uv run --frozen --no-sync ruff format .` to format, then `uv run --frozen --no-sync python tools/check_python.py --all` to check. Commit and push hooks run Ruff and one complete native mypy batch against isolated index bytes/config; Trunk retains non-Python gates. Historical archive source is excluded from lint but every tracked notebook obeys the output guard.
 
 ## Type hints
 

@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from functools import partial
@@ -23,15 +23,17 @@ from category_sync import (
     unknown,
     unresolved_cells,
 )
-from file_io import atomic_write
+from file_io import Revision, atomic_write
 from file_io import write_json_atomic as write_json_atomic
 from issue_links import fetch_link_graph
 from operation_errors import OperationDiagnostic, safe_diagnostic
 from service_desks import BY_KEY, InvalidIssue
-from settings import DEFAULT_TENANT, TENANT_ATTR, load_settings
+from settings import DEFAULT_TENANT, TENANT_ATTR, Settings, load_settings
 
 
-def merge_import(current, incoming, baseline):
+def merge_import(
+    current: pd.DataFrame | None, incoming: pd.DataFrame, baseline: pd.DataFrame | None
+) -> tuple[pd.DataFrame, int]:
     """Keep rows changed during the pull and rows newer than its Jira snapshot."""
     from data_transformation import upsert_jira_data
 
@@ -76,7 +78,7 @@ class SyncRequest:
     repair_sources: bool = False
     publish_raw: bool = False
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         """Serialize this request or report into the shared status artifact format."""
         return {
             **asdict(self),
@@ -86,8 +88,14 @@ class SyncRequest:
 
 
 def make_sync_request(
-    start, end, projects=None, *, resume=False, repair_sources=False, publish_raw=False
-):
+    start: datetime,
+    end: datetime | None,
+    projects: Iterable[str] | None = None,
+    *,
+    resume: bool = False,
+    repair_sources: bool = False,
+    publish_raw: bool = False,
+) -> SyncRequest:
     """Validate and capture selected desks and an exact UTC import window."""
     from service_desks import BERLIN, as_utc, selected_projects
 
@@ -104,9 +112,9 @@ def make_sync_request(
 class SyncReport:
     """Aggregate per-desk outcomes and publication failures from one shared import."""
 
-    counts: dict = field(default_factory=dict)
-    errors: dict = field(default_factory=dict)
-    asset_failures: dict = field(default_factory=dict)
+    counts: dict[str, int] = field(default_factory=dict)
+    errors: dict[str, str] = field(default_factory=dict)
+    asset_failures: dict[str, int] = field(default_factory=dict)
     invalid_rows: dict[str, int] = field(default_factory=dict)
     link_failures: dict[str, int] = field(default_factory=dict)
     diagnostics: list[OperationDiagnostic] = field(default_factory=list)
@@ -114,14 +122,14 @@ class SyncReport:
     protected_rows: int = 0
     categories: CategoryRepairReport = field(default_factory=CategoryRepairReport)
     source_updates: int = 0
-    cache_revision: tuple | None = None
+    cache_revision: Revision | None = None
     raw_error: str | None = None
     source_error: str | None = None
     save_error: str | None = None
     committed: bool = False
 
     @property
-    def complete(self):
+    def complete(self) -> bool:
         """Report whether every required stage finished without rejected or failed rows."""
         return not (
             self.errors
@@ -135,17 +143,21 @@ class SyncReport:
             or self.save_error
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         """Serialize this request or report into the shared status artifact format."""
         return {**asdict(self), "complete": self.complete}
 
 
-def status_path(data_path):
+def status_path(data_path: str | Path) -> Path:
     """Resolve the shared import status beside the selected ticket cache."""
     return Path(data_path).parent / "import_status.json"
 
 
-def _seed_category_context(issues, resolver, references):
+def _seed_category_context(
+    issues: Iterable[dict[str, Any]],
+    resolver: CategoryResolver,
+    references: dict[str, dict[str, Any]],
+) -> None:
     tenant = resolver.settings.tenant
 
     for issue in issues:
@@ -173,7 +185,13 @@ def _seed_category_context(issues, resolver, references):
                 )
 
 
-def _keep_valid_category_labels(baseline, incoming, references, *, settings=None):
+def _keep_valid_category_labels(
+    baseline: pd.DataFrame,
+    incoming: pd.DataFrame,
+    references: Mapping[str, Mapping[str, Any]],
+    *,
+    settings: Settings | None = None,
+) -> pd.DataFrame:
     tenant = (settings or load_settings()).tenant
 
     result = incoming.copy()
@@ -229,7 +247,7 @@ def _keep_known_links(baseline: pd.DataFrame, incoming: pd.DataFrame) -> pd.Data
     return result
 
 
-def _repair_input(candidate, baseline):
+def _repair_input(candidate: pd.DataFrame, baseline: pd.DataFrame) -> pd.DataFrame:
     """Retained concurrent rows may still need the baseline's unknown repaired."""
     result = candidate.copy()
     if baseline.empty or "key" not in baseline or "key" not in result:
@@ -245,7 +263,7 @@ def _repair_input(candidate, baseline):
     return result
 
 
-def _remaining_asset_failure(errors, resolver):
+def _remaining_asset_failure(errors: Iterable[str], resolver: CategoryResolver) -> bool:
     tenant = resolver.settings.tenant
 
     for error in errors:
@@ -261,7 +279,14 @@ def _remaining_asset_failure(errors, resolver):
     return False
 
 
-def publish_raw_snapshot(checkpoint_dir, projects, target, *, run_id, request):
+def publish_raw_snapshot(
+    checkpoint_dir: str | Path,
+    projects: Sequence[str],
+    target: str | Path,
+    *,
+    run_id: str,
+    request: SyncRequest,
+) -> None:
     """Publish one project at a time; the raw array is diagnostic, not the cache."""
     digest = hashlib.sha256()
     count = 0
@@ -304,7 +329,12 @@ def publish_raw_snapshot(checkpoint_dir, projects, target, *, run_id, request):
     )
 
 
-def run_sync(request, *, progress=None, data_path=None):
+def run_sync(
+    request: SyncRequest,
+    *,
+    progress: Callable[[dict[str, Any]], None] | None = None,
+    data_path: str | Path | None = None,
+) -> SyncReport:
     """Download once, reconcile with current data, repair, and commit autonomously."""
     import data_loading
     import sync_checkpoints
@@ -328,16 +358,17 @@ def run_sync(request, *, progress=None, data_path=None):
     )
     report = SyncReport()
     with data_loading.import_operation_lock(data_path):
-        status = {
+        run_id = uuid4().hex
+        status: dict[str, Any] = {
             "version": 1,
-            "run_id": uuid4().hex,
+            "run_id": run_id,
             "request": request.to_dict(),
             "state": "running",
             "progress": "Import wird gestartet",
             "report": None,
         }
 
-        def emit(message, phase="fetch", project=None):
+        def emit(message: str, phase: str = "fetch", project: str | None = None) -> None:
             status["progress"] = message
             write_json_atomic(status_path(data_path), status)
             if progress:
@@ -351,7 +382,7 @@ def run_sync(request, *, progress=None, data_path=None):
         ) -> str:
             cause = safe_diagnostic(
                 exc,
-                operation_id=status["run_id"],
+                operation_id=run_id,
                 stage=stage,
                 project=project,
                 key=key,
@@ -364,7 +395,9 @@ def run_sync(request, *, progress=None, data_path=None):
         try:
             baseline, _ = data_loading.load_data_snapshot(path=data_path, settings=config)
             baseline = baseline if baseline is not None else pd.DataFrame()
-            frames, references, failures = [], {}, {}
+            frames: list[pd.DataFrame] = []
+            references: dict[str, dict[str, Any]] = {}
+            failures: dict[str, list[list[str]]] = {}
             from asset_country import load_cache
 
             country_cache = load_cache(data_path.parent / "asset_country.json", settings=config)
@@ -374,7 +407,7 @@ def run_sync(request, *, progress=None, data_path=None):
                 report.invalid_rows[event.project] = report.invalid_rows.get(event.project, 0) + 1
                 report.diagnostics.append(
                     OperationDiagnostic(
-                        status["run_id"],
+                        run_id,
                         "transform",
                         "invalid_created",
                         project=event.project,
@@ -415,19 +448,17 @@ def run_sync(request, *, progress=None, data_path=None):
                         category_resolver=resolver,
                         settings=config,
                         invalid_row_cb=invalid_row,
-                        progress=lambda message, project=project: emit(message, project=project),
+                        progress=partial(emit, project=project),
                     )
                     for value in issues:
                         link_fields[value["key"]] = value.get("fields") or {}
                         link_errors.pop(value["key"], None)
-                    graph = fetch_link_graph(
-                        issues, fetch_many=fetch_links, operation_id=status["run_id"]
-                    )
+                    graph = fetch_link_graph(issues, fetch_many=fetch_links, operation_id=run_id)
                     causes = [
                         (
                             safe_diagnostic(
                                 link_errors[cause.key],
-                                operation_id=status["run_id"],
+                                operation_id=run_id,
                                 stage="links",
                                 project=project,
                                 key=cause.key,
@@ -484,12 +515,12 @@ def run_sync(request, *, progress=None, data_path=None):
                         )
                         for index, row in candidate.iterrows():
                             if not text_value(row.get("source")) and text_value(
-                                repaired.loc[index].get("source")
+                                repaired.at[index, "source"]
                             ):
                                 source_patches.append(
                                     (
                                         row["key"],
-                                        repaired.loc[index, "source"],
+                                        repaired.at[index, "source"],
                                         row.get("updated"),
                                     )
                                 )
@@ -529,10 +560,10 @@ def run_sync(request, *, progress=None, data_path=None):
                         indexes = merged.index[merged["key"] == key]
                         if len(indexes) == 1:
                             index = indexes[0]
-                            if not text_value(merged.loc[index].get("source")) and text_value(
-                                merged.loc[index].get("updated")
+                            if not text_value(merged.at[index, "source"]) and text_value(
+                                merged.at[index, "updated"]
                             ) == text_value(expected_updated):
-                                merged.loc[index, "source"] = source
+                                merged.at[index, "source"] = source
                                 report.source_updates += 1
                     report.categories.unresolved_cells = unresolved_cells(merged)
                     if not current.equals(merged):
@@ -553,7 +584,7 @@ def run_sync(request, *, progress=None, data_path=None):
                             data_path.parent,
                             request.projects,
                             data_path.parent / "jira_issues.json",
-                            run_id=status["run_id"],
+                            run_id=run_id,
                             request=request,
                         )
                     except Exception as exc:  # noqa: BLE001 - cache was already committed

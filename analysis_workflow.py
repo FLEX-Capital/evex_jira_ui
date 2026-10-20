@@ -58,7 +58,12 @@ def select_cohort(frame: pd.DataFrame, spec: AnalysisSpec) -> pd.DataFrame:
     """Copy exact project/window rows, recording mutually exclusive exclusion counts."""
     keys = frame.get("key", pd.Series(index=frame.index, dtype="string")).astype("string")
     project = keys.str.fullmatch(re.escape(spec.project) + r"-\d+", na=False)
-    created = pd.to_datetime(frame.get("created"), format="mixed", errors="coerce", utc=True)
+    values = (
+        frame["created"]
+        if "created" in frame
+        else pd.Series(pd.NaT, index=frame.index, dtype="datetime64[ns, UTC]")
+    )
+    created = pd.to_datetime(values, format="mixed", errors="coerce", utc=True)
     if created is None:
         created = pd.Series(pd.NaT, index=frame.index, dtype="datetime64[ns, UTC]")
     valid = created.notna()

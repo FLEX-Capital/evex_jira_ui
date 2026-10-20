@@ -1,6 +1,6 @@
 import re
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from functools import partial
@@ -12,6 +12,7 @@ import requests
 from jira import JIRA
 
 import service_desks as desks
+from category_sync import CategoryResolver
 from file_io import path_lock, write_json_atomic
 from http_policy import SOURCE, validate_search_page, with_retries
 from service_desks import InvalidIssue, as_utc, effective_start, filter_issue_window
@@ -32,7 +33,13 @@ def _require_credentials(settings: Settings | None = None) -> JiraConnection:
     return (settings or load_settings()).require_jira()
 
 
-def jira_request(url, params=None, timeout=30, *, settings=None):
+def jira_request(
+    url: str,
+    params: Mapping[str, Any] | None = None,
+    timeout: float = 30,
+    *,
+    settings: Settings | None = None,
+) -> Any:
     """Helper function to make authenticated requests to the JIRA API."""
     connection = _require_credentials(settings)
     response = requests.get(
@@ -73,13 +80,13 @@ def fetch_asset_object_uncached(
 
 
 def fetch_object_schema_list(
-    start_at=0,
-    max_results=50,
-    include_counts=False,
-    workspace_id=None,
+    start_at: int = 0,
+    max_results: int = 50,
+    include_counts: bool = False,
+    workspace_id: str | None = None,
     *,
-    settings=None,
-):
+    settings: Settings | None = None,
+) -> dict[str, Any]:
     """Fetch a page of Jira Assets object schemas via the Atlassian Cloud Assets REST API."""
     config = settings or load_settings()
     workspace_id = config.tenant.workspace_id if workspace_id is None else workspace_id
@@ -100,8 +107,12 @@ def fetch_object_schema_list(
 
 
 def fetch_all_object_schemas(
-    workspace_id=None, max_results=50, include_counts=False, *, settings=None
-):
+    workspace_id: str | None = None,
+    max_results: int = 50,
+    include_counts: bool = False,
+    *,
+    settings: Settings | None = None,
+) -> list[dict[str, Any]]:
     """Fetch all Jira Assets object schemas, paging through the list endpoint."""
     config = settings or load_settings()
     schemas = []
@@ -122,7 +133,7 @@ def fetch_all_object_schemas(
     return schemas
 
 
-def get_asset_attribute(asset, attribute_name):
+def get_asset_attribute(asset: Mapping[str, Any], attribute_name: str) -> Any:
     """Return the displayValue of a named attribute on an Asset object response."""
     for attr in asset.get("attributes", []):
         name = attr.get("objectTypeAttribute", {}).get("name", "")
@@ -147,7 +158,7 @@ def get_asset_attribute(asset, attribute_name):
 RETAINED_FIELDS = frozenset(desks.FIELDS.retained())
 
 
-def trim_issue(issue):
+def trim_issue(issue: Mapping[str, Any]) -> dict[str, Any]:
     """Drop the ~150 fields per issue that nothing downstream reads."""
     trimmed = {key: value for key, value in issue.items() if key != "fields"}
     trimmed["fields"] = {
@@ -166,7 +177,12 @@ ASSET_FIELDS = (
 )
 
 
-def enrich_issue_assets(issue, *, category_resolver=None, settings=None):
+def enrich_issue_assets(
+    issue: Mapping[str, Any],
+    *,
+    category_resolver: CategoryResolver | None = None,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
     """Resolve only normal-workspace references; retain explicit optional failures."""
     config = settings or load_settings()
     tenant = config.tenant
@@ -258,7 +274,7 @@ def _issue_updated_ts(issue: Mapping[str, Any]) -> datetime | None:
         return None
 
 
-def dedupe_issues(issues, key_field="key"):
+def dedupe_issues(issues: Iterable[dict[str, Any]], key_field: str = "key") -> list[dict[str, Any]]:
     """Return issues with a unique key, preferring the most recent push.
 
     When the same key appears more than once, the record with the newest
@@ -266,7 +282,7 @@ def dedupe_issues(issues, key_field="key"):
     appears later in the input (i.e. the more recently pushed one, when the
     caller passes ``previous + new``). Records without a key are dropped.
     """
-    best = {}
+    best: dict[Any, dict[str, Any]] = {}
     for issue in issues:
         key = issue.get(key_field)
         if key is None:

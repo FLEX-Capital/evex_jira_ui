@@ -38,7 +38,7 @@ from data_loading import (
 from file_io import atomic_write
 from jira_country_export import resolve_asset_country_strict
 from resolution_bands import classify_bands
-from settings import load_settings
+from settings import Settings, load_settings
 
 DEFAULT_INPUT = "data/jira_data.pkl"
 
@@ -49,7 +49,7 @@ DONE_COLUMN = "is_done"
 BAND_COLUMN = "resolution_band"
 
 
-def add_resolution_band(df):
+def add_resolution_band(df: pd.DataFrame) -> pd.DataFrame:
     """Return a copy of df with 'resolution_band' added, if inputs allow it.
 
     classify_bands only needs HOURS_COLUMN and DONE_COLUMN, both of which are
@@ -78,7 +78,9 @@ def add_resolution_band(df):
     return out
 
 
-def write_pickle_atomically(df, path, *, settings=None):
+def write_pickle_atomically(
+    df: pd.DataFrame, path: str | Path, *, settings: Settings | None = None
+) -> None:
     """Write df to path so an interrupted run cannot leave a truncated pickle.
 
     The dashboard cache is read by data_loading.load_data() with a plain open(),
@@ -96,7 +98,7 @@ def write_pickle_atomically(df, path, *, settings=None):
     atomic_write(Path(path), df.to_pickle)
 
 
-def main():
+def main() -> None:
     """Run the explicitly requested country-cache enrichment operation."""
     config = load_settings()
     paths = config.paths

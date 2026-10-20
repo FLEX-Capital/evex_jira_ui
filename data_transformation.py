@@ -93,7 +93,7 @@ def enrich_jira_time_metrics(
     )
     out["is_done"] = out["completion_state"].map({"done": True, "open": False}).astype("boolean")
     done = out["completion_state"].eq("done")
-    out["resolved_at"] = out[status_date_col].where(done, pd.NaT)
+    out["resolved_at"] = out[status_date_col].where(done)
     endpoints = out[created_col].notna() & out["resolved_at"].notna()
     reversed_time = endpoints & (out["resolved_at"] < out[created_col])
     valid = done & endpoints & ~reversed_time
@@ -276,7 +276,7 @@ _ISSUE_COLUMNS = [
 ]
 
 
-def _nested(mapping, *keys, default=""):
+def _nested(mapping: Mapping[str, Any] | None, *keys: str, default: Any = "") -> Any:
     value = mapping
     for key in keys:
         if not isinstance(value, dict):
@@ -287,7 +287,7 @@ def _nested(mapping, *keys, default=""):
     return value
 
 
-def _asset_id(fields, field_name):
+def _asset_id(fields: Mapping[str, Any], field_name: str) -> str:
     values = fields.get(field_name) or []
     if not isinstance(values, list) or not values or not isinstance(values[0], dict):
         return ""
@@ -295,7 +295,9 @@ def _asset_id(fields, field_name):
     return "" if value is None else str(value)
 
 
-def _asset_label(issue, field_name, *, settings=None):
+def _asset_label(
+    issue: Mapping[str, Any], field_name: str, *, settings: Settings | None = None
+) -> str:
     config = settings or load_settings()
     if (issue.get("category_status") or {}).get(field_name) == "unassigned":
         return "Nicht zugeordnet"
@@ -322,7 +324,13 @@ def _asset_label(issue, field_name, *, settings=None):
     return object_id_to_name.get(str(object_id), "Unbekannt")
 
 
-def _extract_issue(issue, comment_separator, *, settings=None, link_graph=None):
+def _extract_issue(
+    issue: Mapping[str, Any],
+    comment_separator: str,
+    *,
+    settings: Settings | None = None,
+    link_graph: LinkGraph | None = None,
+) -> dict[str, Any]:
     config = settings or load_settings()
     fields = issue.get("fields") or {}
     asset_references = issue_asset_references(issue, tenant=config.tenant)
@@ -403,16 +411,16 @@ def _extract_issue(issue, comment_separator, *, settings=None, link_graph=None):
 
 
 def _load_service_desk_issues(
-    issues,
+    issues: list[dict[str, Any]] | None,
     *,
-    firma,
-    clone_project=None,
-    clone_of_clone_project=None,
-    comment_separator="\n--------------------------------\n",
-    country_cache=None,
-    settings=None,
-    link_graph=None,
-):
+    firma: str,
+    clone_project: str | None = None,
+    clone_of_clone_project: str | None = None,
+    comment_separator: str = "\n--------------------------------\n",
+    country_cache: CountryCache | Mapping[str, str | None] | None = None,
+    settings: Settings | None = None,
+    link_graph: LinkGraph | None = None,
+) -> pd.DataFrame:
     config = settings or load_settings()
     rows = [
         _extract_issue(issue, comment_separator, settings=config, link_graph=link_graph)
@@ -545,7 +553,7 @@ def load_project_issues(
     )
 
 
-def _normalize_bool_columns(df):
+def _normalize_bool_columns(df: pd.DataFrame) -> pd.DataFrame:
     for column in ("is_done", "has_exax_clone", "has_axt_clone_clone"):
         if column not in df.columns:
             continue
@@ -556,7 +564,9 @@ def _normalize_bool_columns(df):
     return df
 
 
-def upsert_jira_data(df_old, df_new, key_col="key"):
+def upsert_jira_data(
+    df_old: pd.DataFrame, df_new: pd.DataFrame, key_col: str = "key"
+) -> pd.DataFrame:
     """Merge normalized tickets by key, preserving prior compatible enrichment."""
     from cache_schema import SCHEMA_ATTR, normalize_frame
 

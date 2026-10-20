@@ -10,7 +10,11 @@ legend order of the Länder chart, where the colours are a ramp and only mean
 anything in sequence.
 """
 
+from typing import Any, cast
+
+import numpy as np
 import pandas as pd
+from pandas._libs.missing import NAType
 
 from reporting_policy import WORKING_DAY_HOURS
 
@@ -46,9 +50,13 @@ ONE_HOUR = 1.0
 HOURS_PER_WORKING_DAY = WORKING_DAY_HOURS
 
 
-def classify_band(biz_hours, is_done, hours_per_working_day=HOURS_PER_WORKING_DAY):
+def classify_band(
+    biz_hours: float | np.floating | NAType | None,
+    is_done: bool | np.bool_ | NAType | None,
+    hours_per_working_day: float = HOURS_PER_WORKING_DAY,
+) -> str:
     """Return the resolution band label for a single ticket."""
-    if pd.isna(is_done):
+    if pd.isna(cast(Any, is_done)):
         return BAND_UNKNOWN_COMPLETION
     if not is_done:
         return BAND_NOT_DONE
@@ -63,7 +71,9 @@ def classify_band(biz_hours, is_done, hours_per_working_day=HOURS_PER_WORKING_DA
     return BAND_OVER_1D
 
 
-def classify_bands(biz_hours, is_done, hours_per_working_day=HOURS_PER_WORKING_DAY):
+def classify_bands(
+    biz_hours: pd.Series, is_done: pd.Series, hours_per_working_day: float = HOURS_PER_WORKING_DAY
+) -> pd.Series:
     """Vectorised classify_band: two Series in, a Series of labels out."""
     hours = pd.Series(biz_hours)
     done = pd.Series(is_done, index=hours.index, dtype="boolean")

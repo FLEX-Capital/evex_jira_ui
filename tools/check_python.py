@@ -50,7 +50,7 @@ def _inventory(root: Path, index_file: Path | None = None) -> list[tuple[str, st
     return records
 
 
-def _check(root: Path, names: list[str]) -> int:
+def _check(root: Path, names: list[str], *, with_types: bool = False) -> int:
     # Both CLI and imported entrypoints resolve the same maintained guard.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tools.notebook_outputs import NotebookError, inspect_notebook
@@ -128,7 +128,33 @@ def _check(root: Path, names: list[str]) -> int:
     )
     if formatting.returncode:
         print(json.dumps({"code": "ruff_format_failed", "status": formatting.returncode}))
-    return int(bool(lint.returncode or formatting.returncode))
+    if lint.returncode or formatting.returncode:
+        return 1
+    if with_types:
+        # One configured scope in the same snapshot; no source argument list or shell.
+        checked = subprocess.run(  # nosec B603
+            [
+                sys.executable,
+                "-m",
+                "mypy",
+                "--python-executable",
+                sys.executable,
+                "--no-pretty",
+                "--no-error-summary",
+                "--show-error-codes",
+            ],
+            cwd=root,
+            env=dict(os.environ, MYPYPATH=str(root), PYTHONPATH=str(root)),
+            capture_output=True,
+            text=True,
+        )
+        if checked.returncode not in (0, 1):
+            print(json.dumps({"code": "mypy_tool_failed", "status": checked.returncode}))
+            return 2
+        for line in checked.stdout.splitlines():
+            print(json.dumps({"code": "mypy", "message": line}, ensure_ascii=True))
+        return checked.returncode
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -138,6 +164,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     mode.add_argument("--all", action="store_true")
     mode.add_argument("--staged", action="store_true")
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--types", action="store_true", help="check the full configured mypy scope")
     parser.add_argument(
         "--index-file", help="explicit hook-provided Git index; empty uses Git default"
     )
@@ -153,14 +180,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         inventory = _inventory(root, index_file)
         names = [name for name, _, _ in inventory]
         if not args.staged:
-            return _check(root, names)
+            return _check(root, names, with_types=args.types)
         with tempfile.TemporaryDirectory(prefix="python-index-") as directory:
             snapshot = Path(directory).resolve()
             for name, _, digest in inventory:
                 target = snapshot / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(_git(root, "cat-file", "blob", digest, index_file=index_file))
-            return _check(snapshot, names)
+            return _check(snapshot, names, with_types=args.types)
     except (OSError, ValueError, subprocess.CalledProcessError):
         print(json.dumps({"code": "python_quality_error"}))
         return 2

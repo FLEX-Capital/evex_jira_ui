@@ -1,6 +1,7 @@
 """Removable custom-date import controls; execution belongs to the shared service."""
 
-from datetime import datetime
+from datetime import date, datetime
+from typing import cast
 
 import streamlit as st
 
@@ -14,7 +15,7 @@ DATES_KEY = "temporary_history_dates"
 REJECTED_KEY = "_history_rejected"
 
 
-def _follow_today(today):
+def _follow_today(today: date) -> None:
     """Keep a default end of "today" current in tabs left open past midnight.
 
     A keyed date_input keeps its stored value when its default changes, so the
@@ -30,7 +31,7 @@ def _follow_today(today):
 
 
 @st.fragment(run_every=5)
-def render_history_pull():
+def render_history_pull() -> None:
     """Render authenticated history-import controls with an independent project/window state."""
     require_current_session()
     with st.container():
@@ -49,13 +50,17 @@ def render_history_pull():
         busy = sync_jobs.JOB.snapshot().get("state") == "running"
         now = datetime.now(BERLIN)
         _follow_today(now.date())
-        picked = st.date_input(
-            "Backfill-Zeitraum (erstellt)",
-            min_value=EARLIEST_DAY,
-            max_value=now.date(),
-            format="DD.MM.YYYY",
-            disabled=busy,
-            key=DATES_KEY,
+        # _follow_today seeds this keyed widget with a date range, including partial tuples.
+        picked = cast(
+            tuple[date, ...],
+            st.date_input(
+                "Backfill-Zeitraum (erstellt)",
+                min_value=EARLIEST_DAY,
+                max_value=now.date(),
+                format="DD.MM.YYYY",
+                disabled=busy,
+                key=DATES_KEY,
+            ),
         )
         projects = st.multiselect(
             "Service Desks",

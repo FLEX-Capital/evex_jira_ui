@@ -31,7 +31,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, Self, get_args
+from typing import Any, Literal, Self, cast, get_args
 from uuid import uuid4
 
 import openai
@@ -245,7 +245,7 @@ def scalar_text(value: object) -> str:
             return ""
         elif not pd.api.types.is_scalar(value) or isinstance(value, (bytes, bytearray, memoryview)):
             raise TicketInputError("invalid_text")
-        elif value is None or bool(pd.isna(value)):
+        elif value is None or bool(pd.isna(cast(Any, value))):
             return ""
         else:
             text = str(value).strip()
@@ -617,7 +617,10 @@ def classify_tickets(
         if key:
             requested[key] = None
         try:
-            key, text = validate_ticket_input(row.to_dict(), max_chars=max_chars)
+            key, text = validate_ticket_input(
+                {name: value for name, value in row.items() if isinstance(name, str)},
+                max_chars=max_chars,
+            )
             identity = classification_identity(key, text, config)
         except TicketInputError as exc:
             row_errors.append({"index": position, "code": exc.code})

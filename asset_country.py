@@ -8,7 +8,7 @@ resolves ids.
 
 import math
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -55,7 +55,7 @@ ESCALATION_COLUMNS = ["ansprechpartner", "filiale", "zentrale"]
 _ABSENT = {"", "nan", "none", "id_", "id_nan", "id_none", "<na>"}
 
 
-def normalise_object_id(value):
+def normalise_object_id(value: object) -> str | None:
     """Return the bare objectId for a stored 'ID_<objectId>' cell, or None."""
     if value is None:
         return None
@@ -355,7 +355,12 @@ def save_cache(
     )
 
 
-def resolve_missing(object_ids, cache, resolver=None, workers=4):
+def resolve_missing(
+    object_ids: Iterable[object],
+    cache: dict[str, str | None],
+    resolver: Callable[[str], str | None] | None = None,
+    workers: int = 4,
+) -> tuple[dict[str, str | None], int, int]:
     """Resolve ids absent from the cache. Returns (cache, resolved, failed).
 
     A failed lookup (deleted or forbidden asset, API outage) is counted but
@@ -379,7 +384,7 @@ def resolve_missing(object_ids, cache, resolver=None, workers=4):
         # Capture one operation snapshot before concurrent network reads.
         resolver = partial(resolve_asset_country_strict, settings=load_settings())
 
-    def _safe(object_id):
+    def _safe(object_id: str) -> tuple[str, str | None, bool]:
         try:
             return object_id, resolver(object_id), False
         except Exception:
@@ -395,7 +400,9 @@ def resolve_missing(object_ids, cache, resolver=None, workers=4):
     return cache, len(pending) - failed, failed
 
 
-def classify_country(ansprechpartner, filiale, zentrale, cache):
+def classify_country(
+    ansprechpartner: object, filiale: object, zentrale: object, cache: Mapping[str, str | None]
+) -> tuple[str, str]:
     """Return (country, source) for one ticket.
 
     country is a country name, NO_COUNTRY_ON_ASSET, NO_ASSETS_LINKED or
@@ -422,7 +429,7 @@ def classify_country(ansprechpartner, filiale, zentrale, cache):
     return NO_COUNTRY_ON_ASSET, NO_SOURCE
 
 
-def collect_object_ids(df):
+def collect_object_ids(df: pd.DataFrame) -> list[object]:
     """Every asset cell from the escalation columns present in the frame."""
     values = []
     for column in ESCALATION_COLUMNS:

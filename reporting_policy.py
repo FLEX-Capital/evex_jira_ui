@@ -1,7 +1,7 @@
 """Shared completion and reporting-calendar policy."""
 
 from datetime import datetime, time
-from typing import Literal
+from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -42,7 +42,7 @@ def completion_state(
             if key == "done":
                 return "done"
             return "open" if key in {"new", "indeterminate"} else "unknown"
-    elif not (pd.api.types.is_scalar(category_key) and pd.isna(category_key)):
+    elif not (pd.api.types.is_scalar(category_key) and pd.isna(cast(Any, category_key))):
         return "unknown"
     if not isinstance(request_status, str) or not request_status.strip():
         return "unknown"

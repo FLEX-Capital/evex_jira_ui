@@ -11,7 +11,7 @@ from dataclasses import dataclass, fields
 from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, BinaryIO, Never
+from typing import Any, BinaryIO, Never, cast
 
 import pandas as pd
 import pyarrow as pa
@@ -183,7 +183,7 @@ def classification_identity(
 
 
 def _missing(value: object) -> bool:
-    return bool(pd.api.types.is_scalar(value) and pd.isna(value))
+    return bool(pd.api.types.is_scalar(value) and pd.isna(cast(Any, value)))
 
 
 def _normalize(frame: pd.DataFrame, *, stored: bool = False) -> pd.DataFrame:
@@ -255,10 +255,15 @@ def _record_hash(record: Mapping[str, Any]) -> str:
     return hashlib.sha256(_canonical(normalized)).hexdigest()
 
 
+def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    # All callers pass _normalize-validated tables whose column names are strings.
+    return cast(list[dict[str, Any]], frame.to_dict("records"))
+
+
 def _deduplicate(frame: pd.DataFrame) -> pd.DataFrame:
     selected: dict[tuple[str, ...], tuple[Any, dict[str, Any]]] = {}
     legacy_counts: Counter[str] = Counter()
-    for record in frame.to_dict("records"):
+    for record in _records(frame):
         identity: tuple[str, ...]
         digest = _record_hash(record)
         if record["verification_state"] == "current":
@@ -291,12 +296,12 @@ def _combine(current: pd.DataFrame, incoming: pd.DataFrame) -> pd.DataFrame:
     # a caller flushing its captured history adds only multiplicity above disk.
     counts = Counter(
         _record_hash(record)
-        for record in current.to_dict("records")
+        for record in _records(current)
         if record["verification_state"] == "legacy_unverified"
     )
     seen: Counter[str] = Counter()
     additional = []
-    for record in incoming.to_dict("records"):
+    for record in _records(incoming):
         if record["verification_state"] == "legacy_unverified":
             digest = _record_hash(record)
             seen[digest] += 1
@@ -438,6 +443,7 @@ def select_classifications(
 
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> Never:
+        """Reject invalid CLI arguments without echoing their values."""
         raise ClassificationCacheError("invalid_arguments")
 
 

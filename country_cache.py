@@ -261,6 +261,7 @@ def merge_country_entries(
 
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> Never:
+        """Reject invalid CLI arguments without echoing their values."""
         raise CountryCacheError("invalid_arguments")
 
 

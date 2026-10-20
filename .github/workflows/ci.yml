@@ -60,7 +60,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install locked analysis and development groups
+        run: uv sync --frozen --group analysis --group dev
+
+      - name: Native Python quality
+        run: uv run --frozen --no-sync python tools/check_python.py --all
+
+      - name: Complete maintained types
+        run: uv run --frozen --no-sync mypy
+
       - name: Trunk check
         uses: trunk-io/trunk-action@v1.3.1
-        with:
-          arguments: --filter=-mypy

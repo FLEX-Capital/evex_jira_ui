@@ -1,9 +1,11 @@
 import fcntl
 import pickle  # nosec B403
 import shutil
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import overload
 
 import pandas as pd
 
@@ -27,7 +29,7 @@ class ImportBusyError(RuntimeError):
 
 
 @contextmanager
-def import_operation_lock(data_path=None):
+def import_operation_lock(data_path: str | Path | None = None) -> Iterator[None]:
     """Serialize imports for the selected ticket cache using a separate operation lock."""
     path = _ticket_path(data_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -45,7 +47,7 @@ def import_operation_lock(data_path=None):
 
 
 @contextmanager
-def cache_lock(path=None, *, blocking=True):
+def cache_lock(path: str | Path | None = None, *, blocking: bool = True) -> Iterator[None]:
     """Serialize read/merge/write transactions across threads and CLI processes.
 
     Lock a stable sidecar, not the pickle inode replaced by atomic saves. The
@@ -55,7 +57,7 @@ def cache_lock(path=None, *, blocking=True):
         yield
 
 
-def cache_revision(path=None) -> Revision | None:
+def cache_revision(path: str | Path | None = None) -> Revision | None:
     """Return the ticket artifact revision or None when it is absent."""
     try:
         stat = _ticket_path(path).stat()
@@ -64,7 +66,9 @@ def cache_revision(path=None) -> Revision | None:
     return stat.st_ino, stat.st_size, stat.st_mtime_ns
 
 
-def load_data_snapshot(path=None, *, settings=None):
+def load_data_snapshot(
+    path: str | Path | None = None, *, settings: Settings | None = None
+) -> tuple[pd.DataFrame | None, Revision | None]:
     """Read a coherent frame and revision for a later conditional save."""
     settings = settings or load_settings()
     target = _ticket_path(path, settings=settings)
@@ -72,7 +76,14 @@ def load_data_snapshot(path=None, *, settings=None):
         return load_data(path=target, settings=settings), cache_revision(target)
 
 
-def save_data_if_unchanged(df, revision, *, backup_prefix=None, path=None, settings=None):
+def save_data_if_unchanged(
+    df: pd.DataFrame,
+    revision: Revision | None,
+    *,
+    backup_prefix: str | None = None,
+    path: str | Path | None = None,
+    settings: Settings | None = None,
+) -> str | None:
     """Commit a snapshot only if no writer has replaced its input meanwhile."""
     settings = settings or load_settings()
     target = _ticket_path(path, settings=settings)
@@ -102,7 +113,15 @@ OBSOLETE_COLUMNS = (
 )
 
 
-def drop_obsolete_columns(df):
+@overload
+def drop_obsolete_columns(df: pd.DataFrame) -> pd.DataFrame: ...
+
+
+@overload
+def drop_obsolete_columns(df: None) -> None: ...
+
+
+def drop_obsolete_columns(df: pd.DataFrame | None) -> pd.DataFrame | None:
     """Return df without the obsolete asset bookkeeping columns."""
     if df is None:
         return df
@@ -110,7 +129,9 @@ def drop_obsolete_columns(df):
     return df.drop(columns=present) if present else df
 
 
-def save_data(df, *, path=None, settings=None):
+def save_data(
+    df: pd.DataFrame, *, path: str | Path | None = None, settings: Settings | None = None
+) -> None:
     """Normalize and atomically publish a ticket frame under its owning lock."""
     settings = settings or load_settings()
     target = _ticket_path(path, settings=settings)
@@ -118,7 +139,9 @@ def save_data(df, *, path=None, settings=None):
         _save_data_unlocked(df, path=target, settings=settings)
 
 
-def _save_data_unlocked(df, *, path=None, settings=None):
+def _save_data_unlocked(
+    df: pd.DataFrame, *, path: str | Path | None = None, settings: Settings | None = None
+) -> None:
     config = settings or load_settings()
     df = normalize_frame(drop_obsolete_columns(df))
     identity = config.tenant.as_dict()
@@ -129,7 +152,9 @@ def _save_data_unlocked(df, *, path=None, settings=None):
     atomic_write(path, lambda handle: pickle.dump(df, handle))
 
 
-def load_data(*, path=None, settings=None):
+def load_data(
+    *, path: str | Path | None = None, settings: Settings | None = None
+) -> pd.DataFrame | None:
     """Read and validate a trusted local ticket cache against captured tenant settings."""
     config = settings or load_settings()
     path = _ticket_path(path, settings=config)

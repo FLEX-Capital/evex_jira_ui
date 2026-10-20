@@ -157,15 +157,14 @@ def test_explicit_index_selection_overrides_default_index(quality_repo: Path) ->
     assert main(args) == 1
 
 
-def test_trunk_type_adapter_batches_unchanged_flags() -> None:
-    """The supplemental adapter checks the same targets/flags in one import graph."""
+def test_type_gate_is_required_without_overlapping_adapter() -> None:
+    """The strict native scope is mandatory while Trunk retains its other enabled checks."""
     import yaml
 
     config = yaml.safe_load((Path(__file__).parents[1] / ".trunk/trunk.yaml").read_text())
-    definition = next(
-        (item for item in config["lint"].get("definitions", []) if item["name"] == "mypy"), None
+    quality = next(
+        item for item in config["actions"]["definitions"] if item["id"] == "python-quality"
     )
-    assert definition is not None
-    command = definition["commands"][0]
-    assert command["batch"] is True
-    assert "${target}" in command["run"] and "--show-error-codes" in command["run"]
+    assert "--types" in quality["run"]
+    assert not any(item.startswith("mypy@") for item in config["lint"]["enabled"])
+    assert {"trunk-check-pre-commit", "trunk-check-pre-push"} <= set(config["actions"]["enabled"])

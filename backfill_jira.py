@@ -9,6 +9,7 @@ Unknown categories are repaired automatically, including older cached tickets.
 """
 
 import argparse
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 
 from data_loading import ImportBusyError
@@ -16,7 +17,7 @@ from desk_sync import make_sync_request, run_sync
 from service_desks import BY_KEY, as_utc, berlin_day_end, berlin_day_start
 
 
-def parse_args(argv=None):
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse the supported project, Berlin date-window and checkpoint CLI options."""
     ap = argparse.ArgumentParser(description=__doc__)
     window = ap.add_mutually_exclusive_group()
@@ -52,7 +53,7 @@ def parse_args(argv=None):
     return args
 
 
-def main(argv=None):
+def main(argv: Sequence[str] | None = None) -> int:
     """Run the shared Jira import and report safe completion or failure counts."""
     args = parse_args(argv)
     end = as_utc(berlin_day_end(args.end)) if args.end else datetime.now(UTC)

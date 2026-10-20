@@ -13,13 +13,14 @@ import streamlit as st
 
 import data_loading
 from desk_sync import SyncRequest, make_sync_request, run_sync, status_path
+from file_io import Revision
 from operation_errors import safe_diagnostic
 from service_desks import BY_KEY
 from settings import load_settings
 from ui_auth import require_current_session
 
 
-def _status_revision(data_path):
+def _status_revision(data_path: str | Path) -> Revision | None:
     try:
         return data_loading.cache_revision(status_path(data_path))
     except OSError:
@@ -32,24 +33,24 @@ class SyncJobs:
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.thread: threading.Thread | None = None
-        self.failure: tuple[Path, object, dict[str, Any]] | None = None
+        self.failure: tuple[Path, Revision | None, dict[str, Any]] | None = None
         self.data_path: Path | None = None
 
     def start(self, request: SyncRequest, *, data_path: str | Path | None = None) -> bool:
         """Admit an import with paths frozen before its worker is launched."""
         data_path = Path(data_path or load_settings().paths.tickets).resolve()
         admitted = threading.Event()
-        accepted = []
+        accepted: list[bool] = []
         observed_revision = _status_revision(data_path)
 
-        def progress(event):
+        def progress(event: dict[str, Any]) -> None:
             nonlocal observed_revision
             observed_revision = _status_revision(data_path)
             if event["phase"] == "admitted":
                 accepted.append(True)
                 admitted.set()
 
-        def work():
+        def work() -> None:
             try:
                 run_sync(request, progress=progress, data_path=data_path)
             except data_loading.ImportBusyError:
@@ -85,7 +86,7 @@ class SyncJobs:
         admitted.wait()
         return bool(accepted)
 
-    def snapshot(self):
+    def snapshot(self) -> dict[str, Any]:
         """Read current shared status and reconcile interrupted worker state."""
         path = self.data_path or load_settings().paths.tickets
         revision = None
@@ -125,7 +126,7 @@ class SyncJobs:
                 pass
         return status
 
-    def resume(self):
+    def resume(self) -> bool:
         """Resume the captured incomplete request when no other import owns the lock."""
         status = self.snapshot()
         if status.get("state") not in {"interrupted", "partial", "failed"}:
@@ -150,7 +151,7 @@ class SyncJobs:
 JOB = SyncJobs()
 
 
-def render_sync_feedback(location):
+def render_sync_feedback(location: str) -> None:
     """Show safe progress and completion feedback with independent resume controls."""
     status = JOB.snapshot()
     token = (status.get("run_id"), status.get("state"))
@@ -241,13 +242,13 @@ def render_sync_feedback(location):
 
 
 @st.fragment(run_every=5)
-def render_sync_status(location):
+def render_sync_status(location: str) -> None:
     """Render current import feedback only for the current authenticated generation."""
     require_current_session()
     render_sync_feedback(location)
 
 
-def render_sidebar_refresh(start, end):
+def render_sidebar_refresh(start: datetime, end: datetime) -> None:
     """Render the shared selected-window import action and worker state."""
     busy = JOB.snapshot().get("state") == "running"
     if st.button("🔄 aktualisieren", key="sync_sidebar_start", disabled=busy):
