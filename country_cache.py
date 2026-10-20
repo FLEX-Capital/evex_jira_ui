@@ -172,7 +172,7 @@ def _decode(payload: bytes) -> tuple[CountryCache, int | None]:
 def load_country_cache(path: Path) -> CountryCache:
     """Read one artifact; legacy values remain unverified and are never rewritten."""
     try:
-        payload, _ = read_file_snapshot(Path(path))
+        payload, _ = read_file_snapshot(Path(path).resolve())
     except FileNotFoundError:
         return CountryCache()
     return _decode(payload)[0]
@@ -221,7 +221,7 @@ def merge_country_entries(
     verified tenant entries. Converting an existing legacy artifact takes an
     exact backup before publication; ordinary reads never enter this function.
     """
-    path = Path(path)
+    path = Path(path).resolve()
     with path_lock(path):
         version: int | None
         payload: bytes | None
@@ -290,6 +290,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     migrate.add_argument("--expected-revision")
     try:
         args = parser.parse_args(argv)
+        args.path = args.path.resolve()
         payload, revision = read_file_snapshot(args.path)
         cache, version = _decode(payload)
         if not args.apply:

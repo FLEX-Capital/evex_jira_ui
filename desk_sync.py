@@ -210,11 +210,22 @@ def _keep_known_links(baseline: pd.DataFrame, incoming: pd.DataFrame) -> pd.Data
         if bool(row["link_enrichment_complete"]) or row["key"] not in previous.index:
             continue
         old = previous.loc[row["key"]]
-        if row.get("issue_links") != old.get("issue_links"):
+        if (
+            not isinstance(old.get("issue_links"), list)
+            or row.get("issue_links") != old["issue_links"]
+        ):
             continue
-        for column in columns:
-            if column in old and pd.isna(row.get(column)) and not pd.isna(old[column]):
-                result.loc[index, column] = old[column]
+        if not all(
+            isinstance(old.get(column), str) and row.get(column) == old[column]
+            for column in ("clones", "clone_types")
+        ):
+            continue
+        if isinstance(old.get("clones_of_clones"), str):
+            # The compatibility text has no per-target provenance. Keep the
+            # previous related fields together until every first hop succeeds;
+            # mixing a partial new string with an old flag contradicts itself.
+            for column in columns:
+                result.loc[index, column] = old.get(column, pd.NA)
     return result
 
 

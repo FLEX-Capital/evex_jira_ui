@@ -677,7 +677,7 @@ def refresh_countries(
                 current.legacy_unverified.pop(key)
                 dropped += 1
 
-    def lookup(identity: AssetIdentity) -> CountryLookup:
+    def resolve_lookup(identity: AssetIdentity) -> CountryLookup:
         if resolver is None:
             return resolve_country(
                 identity, fetch=partial(fetch_country_asset, settings=config)
@@ -693,9 +693,17 @@ def refresh_countries(
         except Exception as exc:
             return CountryLookup(identity, "failed", None, _country_error_code(exc))
 
+    def lookup(identity: AssetIdentity) -> tuple[CountryLookup, datetime]:
+        outcome = resolve_lookup(identity)
+        # Timestamp response completion in its worker, before ordered consumption
+        # can be delayed by an unrelated slower asset.
+        return outcome, clock()
+
     failed = resolved = 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        for identity, outcome in zip(pending, pool.map(lookup, pending), strict=True):
+        for identity, (outcome, completed_at) in zip(
+            pending, pool.map(lookup, pending), strict=True
+        ):
             if outcome.outcome not in ("found", "no_country"):
                 failed += 1
                 continue
@@ -703,7 +711,7 @@ def refresh_countries(
                 identity,
                 "found" if outcome.outcome == "found" else "no_country",
                 outcome.country,
-                clock(),
+                completed_at,
             )
             current.entries[identity] = choose_country_entry(
                 current.entries.get(identity), entry

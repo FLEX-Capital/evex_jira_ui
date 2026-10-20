@@ -1,4 +1,3 @@
-import json
 import re
 import time
 from collections.abc import Callable, Mapping
@@ -13,6 +12,7 @@ import requests
 from jira import JIRA
 
 import service_desks as desks
+from file_io import path_lock, write_json_atomic
 from http_policy import SOURCE, validate_search_page, with_retries
 from service_desks import InvalidIssue, as_utc, effective_start, filter_issue_window
 from settings import (
@@ -422,9 +422,9 @@ def fetch_jira_issues(
         partial_cb(unflushed)
     all_issues = dedupe_issues(all_issues)
     if save_path:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        with open(save_path, "w") as f:
-            json.dump(all_issues, f)
+        target = Path(save_path).resolve()
+        with path_lock(target):
+            write_json_atomic(target, all_issues)
     return all_issues
 
 
