@@ -23,13 +23,16 @@ SOURCE = ROOT / "amparex_ai_assist_analysis.ipynb"
 
 
 @pytest.fixture(
-    scope="module", params=[True, False], ids=["fake-classification", "cache-only"]
+    scope="module",
+    params=[True, False, "empty"],
+    ids=["fake-classification", "cache-only", "empty-cohort"],
 )
 def notebook_smoke(
     request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
 ) -> dict[str, Any]:
     """Run each mode once in a child kernel with an isolated cwd, environment and artifacts."""
-    run = request.param
+    run = request.param is True
+    empty = request.param == "empty"
     directory = tmp_path_factory.mktemp("notebook")
     data = directory / "data"
     normal = issue(
@@ -62,6 +65,8 @@ def notebook_smoke(
         + (ROOT / "tests/notebook_bootstrap.py").read_text()
         + "\nblocked_transports = await verify_transports()\n"
     )
+    if empty:
+        bootstrap += "\nSTART_DATE=date(2030,1,1)\nEND_DATE=date(2030,1,2)\n"
     notebook.cells.insert(0, nbformat.v4.new_code_cell(bootstrap))
     notebook.cells.append(
         nbformat.v4.new_code_cell(
@@ -102,6 +107,7 @@ def notebook_smoke(
     state = json.loads((directory / "state.json").read_text())
     return dict(
         run=run,
+        empty=empty,
         directory=directory,
         state=state,
         before=original,
@@ -115,11 +121,18 @@ def test_notebook_runs_offline_with_selected_cohort(
 ) -> None:
     """Both modes select exactly two tickets and block all HTTP implementations in the kernel."""
     result = notebook_smoke["state"]
-    assert result["keys"] == ["SDAX-1", "SDAX-2"]
-    assert result["categories"] == ["Known category", "Unbekannt"]
-    assert result["labelled_rows"] == 2 and result["blocked_transports"] == 5
-    assert result["manifest"]["selected_rows"] == 2
-    assert result["manifest"]["excluded_window_rows"] == 1
+    expected = [] if notebook_smoke["empty"] else ["SDAX-1", "SDAX-2"]
+    assert result["keys"] == expected
+    assert result["categories"] == (
+        [] if notebook_smoke["empty"] else ["Known category", "Unbekannt"]
+    )
+    assert (
+        result["labelled_rows"] == len(expected) and result["blocked_transports"] == 5
+    )
+    assert result["manifest"]["selected_rows"] == len(expected)
+    assert result["manifest"]["excluded_window_rows"] == (
+        3 if notebook_smoke["empty"] else 1
+    )
     assert result["manifest"]["excluded_project_rows"] == 1
     assert result["success"] == (2 if notebook_smoke["run"] else 0)
     assert all(
