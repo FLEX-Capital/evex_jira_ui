@@ -1,7 +1,9 @@
 """Desk identity and import boundaries, independent of Jira credentials."""
 
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -71,16 +73,41 @@ def filter_companies(frame, labels):
     return frame.loc[frame["firma"].isin(companies)].copy()
 
 
-def filter_issue_window(project, issues, start, end):
+@dataclass(frozen=True)
+class InvalidIssue:
+    """Safe identity and reason for a rejected raw Jira record."""
+
+    project: str
+    key: str | None
+    code: Literal["invalid_created"] = "invalid_created"
+
+
+def filter_issue_window(
+    project: str,
+    issues: Iterable[dict[str, Any]],
+    start: datetime | None,
+    end: datetime | None,
+    *,
+    invalid_row_cb: Callable[[InvalidIssue], None] | None = None,
+) -> list[dict[str, Any]]:
     """Enforce exact instants after Jira's minute-granularity search/checkpoints."""
     start = effective_start(project, start)
     end = as_utc(end) if end else None
     result = []
     for issue in issues:
-        if not issue.get("key", "").startswith(project + "-"):
+        key = issue.get("key")
+        if not isinstance(key, str) or not key.startswith(project + "-"):
             continue
-        created = datetime.fromisoformat(issue["fields"]["created"])
-        created = as_utc(created)
+        fields = issue.get("fields")
+        value = fields.get("created") if isinstance(fields, Mapping) else None
+        try:
+            if not isinstance(value, str):
+                raise ValueError("invalid creation date")
+            created = as_utc(datetime.fromisoformat(value))
+        except (ValueError, OverflowError):
+            if invalid_row_cb:
+                invalid_row_cb(InvalidIssue(project, key))
+            continue
         if (start is None or created >= start) and (end is None or created <= end):
             result.append(issue)
     return result

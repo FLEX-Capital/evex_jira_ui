@@ -22,7 +22,7 @@ from category_sync import (
     unknown,
     unresolved_cells,
 )
-from service_desks import BY_KEY
+from service_desks import BY_KEY, InvalidIssue
 
 
 def write_json_atomic(path, value):
@@ -119,6 +119,7 @@ class SyncReport:
     counts: dict = field(default_factory=dict)
     errors: dict = field(default_factory=dict)
     asset_failures: dict = field(default_factory=dict)
+    invalid_rows: dict[str, int] = field(default_factory=dict)
     rows: int = 0
     protected_rows: int = 0
     categories: CategoryRepairReport = field(default_factory=CategoryRepairReport)
@@ -134,6 +135,7 @@ class SyncReport:
         return not (
             self.errors
             or any(self.asset_failures.values())
+            or any(self.invalid_rows.values())
             or self.categories.unresolved_cells
             or self.raw_error
             or self.source_error
@@ -316,6 +318,12 @@ def run_sync(request, *, progress=None, data_path=None):
             baseline = baseline if baseline is not None else pd.DataFrame()
             frames, references, failures = [], {}, {}
             resolver = CategoryResolver()
+
+            def invalid_row(event: InvalidIssue) -> None:
+                report.invalid_rows[event.project] = (
+                    report.invalid_rows.get(event.project, 0) + 1
+                )
+
             for project in request.projects:
                 try:
                     emit(
@@ -329,6 +337,7 @@ def run_sync(request, *, progress=None, data_path=None):
                         request.resume,
                         checkpoint_dir=data_path.parent,
                         category_resolver=resolver,
+                        invalid_row_cb=invalid_row,
                         progress=lambda message, project=project: emit(
                             message, project=project
                         ),

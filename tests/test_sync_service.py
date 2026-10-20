@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -342,3 +343,67 @@ def test_raw_metadata_failure_is_reported_after_cache_commit(storage, monkeypatc
             (storage.parent / "jira_issues.json").read_bytes()
         ).hexdigest()
     )
+
+
+def test_invalid_rows_preserve_cached_counterpart_and_valid_desk_rows(
+    storage: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rejecting one raw row preserves its cache while other rows can commit."""
+    from data_transformation import load_project_issues
+
+    previous = load_project_issues("SDAX", [raw()])
+    previous.loc[0, "summary"] = "retained cached value"
+    data_loading.save_data(previous)
+    bad = raw()
+    bad["fields"]["created"] = "SYNTHETIC_PRIVATE_MARKER"
+    monkeypatch.setattr(
+        sync_checkpoints,
+        "fetch_jira_issues",
+        lambda *a, project, **k: (
+            [bad, raw("SDAX", 2)] if project == "SDAX" else [raw(project)]
+        ),
+    )
+    report = desk_sync.run_sync(request(projects=["SDAX", "SDEU"]))
+    result = pd.read_pickle(storage).set_index("key")
+    assert result.loc["SDAX-1", "summary"] == "retained cached value"
+    assert set(result.index) == {"SDAX-1", "SDAX-2", "SDEU-1"}
+    assert report.invalid_rows == {"SDAX": 1}
+    assert report.counts == {"SDAX": 1, "SDEU": 1}
+    assert report.committed and not report.complete
+    status = json.loads((storage.parent / "import_status.json").read_text())
+    assert status["state"] == "partial"
+    assert status["report"]["invalid_rows"] == {"SDAX": 1}
+    assert "SYNTHETIC_PRIVATE_MARKER" not in json.dumps(status)
+
+
+def test_missing_updated_is_kept_with_unknown_recency(
+    storage: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Valid creation is sufficient for import even without update recency."""
+    value = raw()
+    value["fields"].pop("updated")
+    monkeypatch.setattr(sync_checkpoints, "fetch_jira_issues", lambda *a, **k: [value])
+    report = desk_sync.run_sync(request(projects=["SDAX"]))
+    assert report.counts == {"SDAX": 1} and report.complete
+    result = pd.read_pickle(storage).iloc[0]
+    assert pd.isna(result.updated)
+    assert pd.isna(result.business_days_created_to_updated)
+
+
+def test_live_fetch_reports_invalid_dates_once(
+    storage: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Actual page validation reports rejections once through the service."""
+    from unittest.mock import MagicMock
+
+    good, bad = raw(), raw(number=2)
+    bad["fields"]["created"] = None
+    client = MagicMock()
+    client.myself.return_value = {"timeZone": "UTC"}
+    client.enhanced_search_issues.return_value = {"issues": [bad, good]}
+    monkeypatch.setattr(jira_loader, "JIRA", lambda **kwargs: client)
+    monkeypatch.setattr(jira_loader, "_require_credentials", lambda: None)
+    report = desk_sync.run_sync(request(projects=["SDAX"]))
+    assert report.counts == {"SDAX": 1}
+    assert report.invalid_rows == {"SDAX": 1}
+    assert not report.complete and report.committed

@@ -1,7 +1,7 @@
 import json
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from functools import cache
 from typing import Any
@@ -11,7 +11,7 @@ import requests
 from dotenv import load_dotenv
 from jira import JIRA
 
-from service_desks import as_utc, effective_start, filter_issue_window
+from service_desks import InvalidIssue, as_utc, effective_start, filter_issue_window
 
 load_dotenv(override=True)
 
@@ -289,16 +289,19 @@ def dedupe_issues(issues, key_field="key"):
 
 
 def fetch_jira_issues(
-    start_dt=None,
-    end_dt=None,
-    max_issues=1000,
-    project="SDIPR",
-    save_path="data/jira_issues.json",
-    progress_cb=None,
-    partial_cb=None,
-    partial_every=100,
-    category_resolver=None,
-):
+    start_dt: datetime | None = None,
+    end_dt: datetime | None = None,
+    max_issues: int = 1000,
+    project: str = "SDIPR",
+    save_path: str | None = "data/jira_issues.json",
+    progress_cb: Callable[[int], None] | None = None,
+    partial_cb: Callable[[list[dict[str, Any]]], None] | None = None,
+    partial_every: int = 100,
+    category_resolver: Any = None,
+    *,
+    invalid_row_cb: Callable[[InvalidIssue], None] | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch a complete desk window, reporting invalid dates without raw values."""
     if not re.fullmatch(r"[A-Z][A-Z0-9_]*", project):
         raise ValueError("Invalid Jira project key")
     start_dt = effective_start(project, start_dt)
@@ -347,7 +350,9 @@ def fetch_jira_issues(
         fetched += len(batch)
         kept = [
             enrich_issue_assets(trim_issue(issue), category_resolver=category_resolver)
-            for issue in filter_issue_window(project, batch, start_dt, end_dt)
+            for issue in filter_issue_window(
+                project, batch, start_dt, end_dt, invalid_row_cb=invalid_row_cb
+            )
         ]
         all_issues.extend(kept)
         unflushed.extend(kept)

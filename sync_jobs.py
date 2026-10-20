@@ -199,6 +199,11 @@ def render_sync_feedback(location):
                 st.warning(
                     f"{project}: Assets-Daten bei {count} Tickets unvollständig. Jira-/Assets-Berechtigungen prüfen."
                 )
+        for project, count in report.get("invalid_rows", {}).items():
+            if count:
+                st.warning(
+                    f"{project}: {count} Tickets wegen ungültigem Erstellungsdatum übersprungen."
+                )
         for name in ("source_error", "save_error", "raw_error"):
             if report.get(name):
                 st.error(f"{name}: {report[name]}")

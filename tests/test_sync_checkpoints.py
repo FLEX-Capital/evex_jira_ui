@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 import jira_loader
+from service_desks import InvalidIssue
 from sync_checkpoints import CheckpointStore
 
 START = datetime(2026, 8, 1, tzinfo=UTC)
@@ -363,3 +364,49 @@ class CheckpointPathTests(unittest.TestCase):
         log, meta = backfill._partial_paths("SDAX")
         self.assertEqual(log, "data/backfill_SDAX.partial.ndjson")
         self.assertEqual(meta, "data/backfill_SDAX.partial.json")
+
+
+def test_checkpoint_validation_reports_invalid_rows_once(tmp_path: Path) -> None:
+    """Fresh, saved and partial paths reject each invalid record only once."""
+    good, bad = raw(5), raw(6)
+    bad["fields"]["created"] = "SYNTHETIC_PRIVATE_MARKER"
+    events: list[InvalidIssue] = []
+    store = CheckpointStore(tmp_path)
+    store.fetch_jira_issues = Mock(return_value=[bad, good])
+    assert store.fetch_project(
+        "SDAX", START, END, False, invalid_row_cb=events.append
+    ) == [good]
+    assert [(e.key, e.code) for e in events] == [("SDAX-6", "invalid_created")]
+    saved = json.loads((tmp_path / "backfill_SDAX.json").read_text())
+    saved["issues"].append(bad)
+    (tmp_path / "backfill_SDAX.json").write_text(json.dumps(saved))
+    store.fetch_jira_issues = Mock(return_value=[])
+    events.clear()
+    assert store.fetch_project(
+        "SDAX", START, END, True, invalid_row_cb=events.append
+    ) == [good]
+    assert len(events) == 1
+    store.begin_partial("SDAX", START, END)([bad, good])
+    events.clear()
+    assert store.fetch_project(
+        "SDAX", START, END, True, invalid_row_cb=events.append
+    ) == [good]
+    assert len(events) == 1
+
+
+def test_invalid_incoming_snapshot_cannot_remove_valid_checkpoint(
+    tmp_path: Path,
+) -> None:
+    """Validation precedes dedupe so a malformed newer record cannot erase history."""
+    good = raw(5)
+    good["fields"]["updated"] = "2026-09-01T00:00:00Z"
+    store = CheckpointStore(tmp_path)
+    store.fetch_jira_issues = Mock(return_value=[good])
+    store.fetch_project("SDAX", START, END, False)
+    bad = {**good, "fields": {"created": None, "updated": "2026-09-02T00:00:00Z"}}
+    store.fetch_jira_issues = Mock(return_value=[bad])
+    events: list[InvalidIssue] = []
+    assert store.fetch_project(
+        "SDAX", START, END, True, invalid_row_cb=events.append
+    ) == [good]
+    assert len(events) == 1

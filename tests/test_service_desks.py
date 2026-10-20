@@ -70,3 +70,19 @@ class DeskTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_window_skips_invalid_creation_with_safe_diagnostic() -> None:
+    """Invalid creation values yield safe diagnostics alongside valid records."""
+    events: list[desks.InvalidIssue] = []
+    good = {"key": "SDAX-1", "fields": {"created": "2026-09-01T10:00:00Z"}}
+    missing = {"key": "SDAX-2", "fields": {}}
+    bad = {"key": "SDAX-3", "fields": {"created": "SYNTHETIC_PRIVATE_MARKER"}}
+    assert desks.filter_issue_window(
+        "SDAX", [missing, bad, good], None, None, invalid_row_cb=events.append
+    ) == [good]
+    assert [(e.project, e.key, e.code) for e in events] == [
+        ("SDAX", "SDAX-2", "invalid_created"),
+        ("SDAX", "SDAX-3", "invalid_created"),
+    ]
+    assert "SYNTHETIC_PRIVATE_MARKER" not in repr(events)

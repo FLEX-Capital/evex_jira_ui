@@ -114,7 +114,7 @@ class CheckpointStore:
 
         return append
 
-    def load_partial(self, project, start_dt):
+    def load_partial(self, project, start_dt, *, invalid_row_cb=None):
         """Return (issues, oldest_created, logged_end) from a resumable partial log.
 
         Returns ([], None, None) when there is nothing to resume. A log from another
@@ -146,6 +146,9 @@ class CheckpointStore:
                 except json.JSONDecodeError:
                     self._say(f"  [{project}] discarding torn final line", flush=True)
                     break
+        issues = filter_issue_window(
+            project, issues, start_dt, None, invalid_row_cb=invalid_row_cb
+        )
         issues = dedupe_issues(issues)
         if not issues:
             return ([], None, None)
@@ -187,7 +190,14 @@ class CheckpointStore:
         return report
 
     def fetch_project(
-        self, project, start_dt, end_dt, resume, *, category_resolver=None
+        self,
+        project,
+        start_dt,
+        end_dt,
+        resume,
+        *,
+        category_resolver=None,
+        invalid_row_cb=None,
     ):
         """Fetch one project's issues, using/creating a raw checkpoint file."""
         start_dt = effective_start(project, start_dt)
@@ -212,7 +222,11 @@ class CheckpointStore:
                         f"{project}: checkpoint ends after the requested window"
                     )
                 issues = filter_issue_window(
-                    project, saved["issues"], start_dt, saved_end
+                    project,
+                    saved["issues"],
+                    start_dt,
+                    saved_end,
+                    invalid_row_cb=invalid_row_cb,
                 )
                 for i, issue in enumerate(issues):
                     if (
@@ -226,7 +240,9 @@ class CheckpointStore:
                 fetch_start = max(start_dt, saved_end)
         partial, oldest_partial, partial_end = ([], None, None)
         if resume:
-            partial, oldest_partial, partial_end = self.load_partial(project, start_dt)
+            partial, oldest_partial, partial_end = self.load_partial(
+                project, start_dt, invalid_row_cb=invalid_row_cb
+            )
             if partial:
                 self._say(
                     f"[{project}] resuming: {len(partial)} issues already saved, oldest {oldest_partial.isoformat()}",
@@ -265,10 +281,16 @@ class CheckpointStore:
                     partial_cb=append,
                     partial_every=self.save_every,
                     category_resolver=category_resolver,
+                    invalid_row_cb=invalid_row_cb,
                 )
             )
+        fresh = filter_issue_window(
+            project, fresh, start_dt, end_dt, invalid_row_cb=invalid_row_cb
+        )
         issues = dedupe_issues(issues + partial + fresh)
-        issues = filter_issue_window(project, issues, start_dt, end_dt)
+        issues = filter_issue_window(
+            project, issues, start_dt, end_dt, invalid_row_cb=invalid_row_cb
+        )
         write_json_atomic(
             checkpoint,
             {
@@ -295,7 +317,13 @@ def fetch_project(
     checkpoint_dir,
     category_resolver=None,
     progress=None,
+    invalid_row_cb=None,
 ):
     return CheckpointStore(checkpoint_dir, progress=progress).fetch_project(
-        project, start_dt, end_dt, resume, category_resolver=category_resolver
+        project,
+        start_dt,
+        end_dt,
+        resume,
+        category_resolver=category_resolver,
+        invalid_row_cb=invalid_row_cb,
     )
