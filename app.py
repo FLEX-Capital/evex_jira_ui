@@ -1,7 +1,4 @@
-from dataclasses import asdict
 from datetime import datetime, timedelta
-from functools import partial
-from uuid import uuid4
 
 import pandas as pd
 import plotly.express as px
@@ -9,18 +6,15 @@ import plotly.graph_objects as go  # Required for adding the custom text layer
 import streamlit as st
 from st_aggrid import AgGrid, GridOptionsBuilder
 
-from asset_country import NOT_RESOLVED, attach_country, country_cache_status
+from asset_country import NOT_RESOLVED, country_cache_status
 from asset_country import load_cache as load_country_cache
-from asset_country import refresh_countries, save_cache
 from cache_schema import CacheReadError, CacheSchemaError
 from country_cache import CountryCacheError
-from data_loading import CacheChangedError, cache_lock
-from data_loading import cache_revision as current_cache_revision
-from data_loading import load_data_snapshot, save_data_if_unchanged
+from data_loading import load_data_snapshot
 from data_transformation import enrich_jira_time_metrics
 from file_io import FileSnapshotChangedError
 from interactive import render_interactive
-from operation_errors import safe_diagnostic
+from maintenance_ui import render_import_empty_state, render_maintenance
 from plotting import (
     apply_font,
     create_resolution_time_charts,
@@ -37,24 +31,9 @@ from service_desks import (
     filter_companies,
 )
 from settings import SettingsError, load_settings
-from source_sync import fetch_issue_sources, refresh_missing_sources
 from styles import CUSTOM_CSS
 from sync_jobs import render_sidebar_refresh
-from temporary_history_pull import render_history_pull
 from ui_auth import require_password
-
-
-def _maintenance_failure(label: str, stage: str, exc: Exception) -> None:
-    """Show a bounded cause while retaining its separate safe diagnostic."""
-    cause = safe_diagnostic(exc, operation_id=uuid4().hex, stage=stage)
-    st.session_state["maintenance_diagnostic"] = asdict(cause)
-    message = f"{label} fehlgeschlagen ({cause.code})."
-    if cause.code == "cache_changed":
-        message += (
-            " Cache wurde parallel geändert; bitte die Aktualisierung wiederholen."
-        )
-    st.error(message)
-
 
 # set to dark mode
 st.set_page_config(page_title="Jira Analytics Dashboard", layout="wide")
@@ -64,7 +43,8 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 # Sidebar
 # add logo in sidebar
-paths = load_settings().paths
+settings = load_settings()
+paths = settings.paths
 st.sidebar.image(str(paths.logo), width=200)
 st.sidebar.header("\n\nJIRA Data Analysis")
 
@@ -134,20 +114,12 @@ with st.sidebar:
     render_sidebar_refresh(start_dt, end_dt)
 
 if not selected_companies:
-    st.info("Bitte mindestens eine Firma auswählen.")
-    with (
-        st.tabs(["📄 Interaktiv"])[0],
-        st.expander("Daten aktualisieren", expanded=False),
-    ):
-        render_history_pull()
+    render_import_empty_state("Bitte mindestens eine Firma auswählen.")
     st.stop()
 if df is None or df.empty:
-    st.info("Keine Jira-Daten vorhanden. Bitte über die Seitenleiste aktualisieren.")
-    with (
-        st.tabs(["📄 Interaktiv"])[0],
-        st.expander("Daten aktualisieren", expanded=False),
-    ):
-        render_history_pull()
+    render_import_empty_state(
+        "Keine Jira-Daten vorhanden. Bitte über die Seitenleiste aktualisieren."
+    )
     st.stop()
 
 created = pd.to_datetime(df["created"], errors="coerce", utc=True)
@@ -155,12 +127,7 @@ df = df.loc[(created >= start_dt) & (created <= end_dt)]
 df = filter_companies(df, selected_companies)
 st.sidebar.info(f"{len(df)} Tickets für die gewählten Firmen im Zeitraum.")
 if df.empty:
-    st.info("Keine Daten für die gewählten Firmen im Zeitraum.")
-    with (
-        st.tabs(["📄 Interaktiv"])[0],
-        st.expander("Daten aktualisieren", expanded=False),
-    ):
-        render_history_pull()
+    render_import_empty_state("Keine Daten für die gewählten Firmen im Zeitraum.")
     st.stop()
 if "completion_state" not in df or df["completion_state"].isna().any():
     df = enrich_jira_time_metrics(df)
@@ -625,7 +592,7 @@ with tab_status:
         .sort_values("key", ascending=False)
     )
     result["status_key"] = result["status"] + " (" + result["key"].astype(str) + ")"
-    # plot using plotly with status_category on x axis and status on y axis, show status and key values inside of bars
+    # Show status and key inside bars, grouped by status category.
     fig = px.bar(
         result, x="status_category", y="key", color="status", text="status_key"
     )
@@ -764,128 +731,7 @@ with tab_raw:
 # -------------------------------
 with tab_interactive:
     st.header("📄 Interaktiv")
-    if "source_sync_success" in st.session_state:
-        sources_updated = st.session_state.pop("source_sync_success")
-        st.success(f"{sources_updated} fehlende Ursprünge aus Jira übernommen.")
-    if "country_sync_success" in st.session_state:
-        stats = st.session_state.pop("country_sync_success")
-        st.success(
-            f"Länder aktualisiert: {stats['resolved']} Assets neu aufgelöst, "
-            f"{stats['rows']} Tickets neu zugeordnet."
-        )
-        if stats["failed"]:
-            st.warning(
-                f"{stats['failed']} Asset-Abfragen fehlgeschlagen. Sie sind nicht "
-                "zwischengespeichert - erneut ausführen, um sie zu wiederholen."
-            )
-        if stats["pending"]:
-            st.warning(
-                f"{stats['pending']} Tickets bleiben „{NOT_RESOLVED}“ "
-                "(fehlgeschlagene Abfragen)."
-            )
-
-    with st.expander("Daten aktualisieren", expanded=False):
-        render_history_pull()
-
-        col_sources, col_countries = st.columns(2)
-        with col_sources:
-            refresh_sources = st.button(
-                "🔄 Fehlenden Ursprung aktualisieren",
-                help="Prüft alle gespeicherten Tickets mit leerem Ursprung in Jira, unabhängig vom gewählten Zeitraum und der Firma.",
-            )
-        with col_countries:
-            force_country_refresh = st.checkbox(
-                "Bekannte Länder erneut prüfen", key="country_force_refresh"
-            )
-            refresh_countries_clicked = st.button(
-                "🌍 Länder aktualisieren",
-                help=(
-                    "Löst alle noch unbekannten Assets über die Assets-API auf und "
-                    "schreibt Land für ALLE gespeicherten Tickets neu - unabhängig "
-                    "vom gewählten Zeitraum und der Firma. Nötig, wenn der Cache "
-                    "einen anderen Datenbestand enthält als die gehosteten Daten."
-                ),
-            )
-
-    if refresh_sources:
-        try:
-            source_config = load_settings()
-            with st.spinner("Fehlende Ursprünge werden mit Jira abgeglichen …"):
-                cached_df, revision = load_data_snapshot(
-                    path=source_config.paths.tickets, settings=source_config
-                )
-                cached_df, sources_updated = refresh_missing_sources(
-                    cached_df,
-                    fetch_sources=partial(fetch_issue_sources, settings=source_config),
-                )
-                save_data_if_unchanged(
-                    cached_df,
-                    revision,
-                    path=source_config.paths.tickets,
-                    settings=source_config,
-                )
-            st.session_state["source_sync_success"] = sources_updated
-        except Exception as exc:  # noqa: BLE001 - report optional/isolated failures
-            _maintenance_failure("Ursprung-Abgleich", "source", exc)
-        else:
-            st.rerun()
-
-    if refresh_countries_clicked:
-        try:
-            country_config = load_settings()
-            country_paths = country_config.paths
-            # The whole cache, not the filtered view: a ticket outside the
-            # current window still needs its Land, and rewriting only the
-            # visible rows would leave the rest stale.
-            with st.spinner("Assets werden aufgelöst und Länder neu zugeordnet …"):
-                cached_df, revision = load_data_snapshot(
-                    path=country_paths.tickets, settings=country_config
-                )
-                before = (
-                    cached_df["Land"]
-                    if "Land" in cached_df.columns
-                    else pd.Series(index=cached_df.index, dtype="object")
-                )
-                country_baseline = load_country_cache(
-                    path=country_paths.countries, settings=country_config
-                )
-                cached_df, cache, stats = refresh_countries(
-                    cached_df,
-                    cache=country_baseline,
-                    cache_path=country_paths.countries,
-                    force=force_country_refresh,
-                    settings=country_config,
-                )
-                # Asset countries do not depend on the ticket cache, and save_cache
-                # merges into the latest mapping, so keep them even if the ticket
-                # cache changed meanwhile; a retry then needs no new lookups.
-                cache = save_cache(
-                    cache,
-                    path=country_paths.countries,
-                    baseline=country_baseline,
-                    settings=country_config,
-                )
-                with cache_lock(country_paths.tickets):
-                    if current_cache_revision(country_paths.tickets) != revision:
-                        raise CacheChangedError(
-                            "Cache wurde parallel geändert; bitte die Aktualisierung wiederholen."
-                        )
-                    cached_df = attach_country(
-                        cached_df, cache, allow_legacy=True, settings=country_config
-                    )
-                    save_data_if_unchanged(
-                        cached_df,
-                        revision,
-                        path=country_paths.tickets,
-                        settings=country_config,
-                    )
-            stats["rows"] = int((cached_df["Land"] != before).sum())
-            stats["pending"] = int((cached_df["Land"] == NOT_RESOLVED).sum())
-            st.session_state["country_sync_success"] = stats
-        except Exception as exc:  # noqa: BLE001 - report optional/isolated failures
-            _maintenance_failure("Länder-Abgleich", "assets", exc)
-        else:
-            st.rerun()
+    render_maintenance(settings)
 
     # pygwalker's StreamlitRenderer divides by the sample length, so an empty
     # frame raises ZeroDivisionError. Bail out early instead.
