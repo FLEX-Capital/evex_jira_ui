@@ -1,6 +1,7 @@
 """Escalation, bucket and cache tests for asset_country."""
 
 import json
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -16,8 +17,21 @@ from asset_country import (
     resolve_missing,
     save_cache,
 )
+from country_cache import AssetIdentity, CountryCache, CountryEntry
+from settings import load_settings
 
 CACHE = {"1": "Deutschland", "2": "Österreich", "3": None}
+
+
+def _verified_cache() -> CountryCache:
+    tenant = load_settings({}).tenant
+    entries = {}
+    for object_id, value in CACHE.items():
+        identity = AssetIdentity(tenant.cloud_id, tenant.workspace_id, object_id)
+        entries[identity] = CountryEntry(
+            identity, "found" if value else "no_country", value, datetime.now(UTC)
+        )
+    return CountryCache(entries, {})
 
 
 def test_ansprechpartner_wins_over_filiale_and_zentrale():
@@ -85,7 +99,9 @@ def test_attach_country_adds_columns_without_mutating():
         }
     )
     before = df.copy()
-    out = attach_country(df, CACHE)
+    out = attach_country(
+        df, _verified_cache(), allow_legacy=True, settings=load_settings({})
+    )
     pd.testing.assert_frame_equal(df, before)
     assert list(out["Land"]) == ["Deutschland", NO_COUNTRY_ON_ASSET, NO_ASSETS_LINKED]
     assert list(out["land_quelle"]) == ["zentrale", NO_SOURCE, NO_SOURCE]
@@ -93,7 +109,9 @@ def test_attach_country_adds_columns_without_mutating():
 
 def test_attach_country_tolerates_missing_column():
     df = pd.DataFrame({"key": ["A-1"], "zentrale": ["ID_1"], "filiale": [""]})
-    out = attach_country(df, CACHE)
+    out = attach_country(
+        df, _verified_cache(), allow_legacy=True, settings=load_settings({})
+    )
     assert list(out["Land"]) == ["Deutschland"]
 
 
@@ -159,22 +177,26 @@ def test_default_resolver_still_caches_a_genuine_absence(monkeypatch):
 def test_cache_roundtrip(tmp_path):
     path = tmp_path / "cache.json"
     save_cache({"1": "Deutschland", "2": None}, str(path))
-    assert load_cache(str(path)) == {"1": "Deutschland", "2": None}
-    assert json.loads(path.read_text(encoding="utf-8"))["1"] == "Deutschland"
+    assert load_cache(str(path)).legacy_unverified == {"1": "Deutschland", "2": None}
+    assert (
+        json.loads(path.read_text(encoding="utf-8"))["legacy_unverified"]["1"]
+        == "Deutschland"
+    )
+    assert not load_cache(path).entries
 
 
 def test_load_cache_missing_file(tmp_path):
-    assert load_cache(str(tmp_path / "absent.json")) == {}
+    assert not load_cache(str(tmp_path / "absent.json"))
 
 
 def test_stale_country_writers_preserve_each_others_additions(tmp_path):
     path = str(tmp_path / "cache.json")
     first, second = load_cache(path), load_cache(path)
-    first["1"] = "Deutschland"
-    second["2"] = "Österreich"
+    first.legacy_unverified["1"] = "Deutschland"
+    second.legacy_unverified["2"] = "Österreich"
     save_cache(first, path)
     save_cache(second, path)
-    assert load_cache(path) == {"1": "Deutschland", "2": "Österreich"}
+    assert load_cache(path).legacy_unverified == {"1": "Deutschland", "2": "Österreich"}
 
 
 def test_country_commit_preserves_concurrent_change_and_removes_only_unchanged_nulls(
@@ -186,7 +208,11 @@ def test_country_commit_preserves_concurrent_change_and_removes_only_unchanged_n
     # A second job resolves an id that the first job only saw as null.
     save_cache({"1": "Deutschland"}, path)
     merged = save_cache({"3": None, "4": "Österreich"}, path, baseline=baseline)
-    assert merged == {"1": "Deutschland", "3": None, "4": "Österreich"}
+    assert merged.legacy_unverified == {
+        "1": "Deutschland",
+        "3": None,
+        "4": "Österreich",
+    }
     assert load_cache(path) == merged
 
 
@@ -210,4 +236,4 @@ def test_country_commits_from_separate_processes_preserve_all_additions(tmp_path
             if process.poll() is None:
                 process.kill()
                 process.wait()
-    assert load_cache(path) == {str(i): str(i) for i in range(4)}
+    assert load_cache(path).legacy_unverified == {str(i): str(i) for i in range(4)}

@@ -4,7 +4,7 @@ import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from enum import Enum
-from functools import cache, partial
+from functools import partial
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -46,15 +46,6 @@ def jira_request(url, params=None, timeout=30, *, settings=None):
     return response.json()
 
 
-@cache
-def _cached_asset(
-    cloud_id: str, workspace_id: str, object_id: str | None, settings: Settings
-) -> dict[str, Any]:
-    return fetch_asset_object_uncached(
-        cloud_id, workspace_id, object_id, settings=settings
-    )
-
-
 def fetch_asset_object(
     cloud_id: str | None = None,
     workspace_id: str | None = None,
@@ -62,15 +53,13 @@ def fetch_asset_object(
     *,
     settings: Settings | None = None,
 ) -> dict[str, Any]:
-    """Cache a successful Assets lookup by full tenant and settings snapshot."""
+    """Read an Assets object with current settings; no process-global response cache."""
     config = settings or load_settings()
     cloud_id = config.tenant.cloud_id if cloud_id is None else cloud_id
     workspace_id = config.tenant.workspace_id if workspace_id is None else workspace_id
-    return _cached_asset(cloud_id, workspace_id, object_id, config)
-
-
-# Preserve the existing explicit cache-management adapter.
-setattr(fetch_asset_object, "cache_clear", _cached_asset.cache_clear)
+    return fetch_asset_object_uncached(
+        cloud_id, workspace_id, object_id, settings=config
+    )
 
 
 def fetch_asset_object_uncached(

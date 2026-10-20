@@ -12,6 +12,7 @@ from jira import JIRA
 import reporting_policy as reporting
 import service_desks as desks
 from asset_country import attach_country, issue_asset_references, load_cache
+from country_cache import CountryCache
 from issue_links import clone_links, parse_issue_links
 from resolution_bands import classify_bands
 from settings import DEFAULT_TENANT, TENANT_ATTR, Settings, load_settings
@@ -495,10 +496,8 @@ def _load_service_desk_issues(
     # has not seen become NOT_RESOLVED rather than silently claiming the asset
     # carries no country; backfill_country.py resolves them.
     if country_cache is None:
-        country_cache = (
-            load_cache(settings=config) if config.tenant == DEFAULT_TENANT else {}
-        )
-    df = attach_country(df, country_cache)
+        country_cache = load_cache(settings=config)
+    df = attach_country(df, country_cache, settings=config)
     df["firma"] = firma
     df["clone_in_project"] = df["clones"].apply(
         lambda value: (
@@ -524,7 +523,7 @@ def _load_service_desk_issues(
 def load_issues(
     issues: list[dict[str, Any]] | None,
     *,
-    country_cache: Mapping[str, str | None] | None = None,
+    country_cache: CountryCache | Mapping[str, str | None] | None = None,
     settings: Settings | None = None,
 ) -> pd.DataFrame:
     """Transform IPRO tickets using their registered desk policy."""
@@ -536,7 +535,7 @@ def load_issues(
 def load_issues_Amparex(
     issues: list[dict[str, Any]] | None,
     *,
-    country_cache: Mapping[str, str | None] | None = None,
+    country_cache: CountryCache | Mapping[str, str | None] | None = None,
     settings: Settings | None = None,
 ) -> pd.DataFrame:
     """Transform Amparex tickets using their registered desk policy."""
@@ -548,7 +547,7 @@ def load_issues_Amparex(
 def load_issues_Euronet(
     issues: list[dict[str, Any]] | None,
     *,
-    country_cache: Mapping[str, str | None] | None = None,
+    country_cache: CountryCache | Mapping[str, str | None] | None = None,
     settings: Settings | None = None,
 ) -> pd.DataFrame:
     """Transform Euronet tickets using their registered desk policy."""
@@ -561,7 +560,7 @@ def load_project_issues(
     project: str,
     issues: list[dict[str, Any]] | None,
     *,
-    country_cache: Mapping[str, str | None] | None = None,
+    country_cache: CountryCache | Mapping[str, str | None] | None = None,
     settings: Settings | None = None,
 ) -> pd.DataFrame:
     """Apply the registry's transformation and escalation policy for one desk."""

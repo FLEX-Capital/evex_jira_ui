@@ -10,9 +10,6 @@ with patch("jira.JIRA"):
 
 
 class AssetsTests(unittest.TestCase):
-    def setUp(self):
-        loader.fetch_asset_object.cache_clear()
-
     def test_enrichment_uses_normal_references_and_discards_old_labels(self):
         issue = {
             "key": "SDEU-1",

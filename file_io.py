@@ -17,6 +17,22 @@ _registry: dict[Path, threading.RLock] = {}
 _local = threading.local()
 
 
+class FileSnapshotChangedError(RuntimeError):
+    """An artifact was edited in place while its bytes were being read."""
+
+
+def read_file_snapshot(path: Path) -> tuple[bytes, Revision]:
+    """Read bytes and revision from one descriptor without creating sidecars."""
+    with Path(path).open("rb") as handle:
+        before = os.fstat(handle.fileno())
+        payload = handle.read()
+        after = os.fstat(handle.fileno())
+    revision = (before.st_ino, before.st_size, before.st_mtime_ns)
+    if revision != (after.st_ino, after.st_size, after.st_mtime_ns):
+        raise FileSnapshotChangedError("file_changed_during_read")
+    return payload, revision
+
+
 class AtomicWriteError(RuntimeError):
     """Publication failed at a safe named stage; payload details are excluded."""
 

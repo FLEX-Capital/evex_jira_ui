@@ -1,6 +1,7 @@
 """Regression tests for backfill_country: banding, backups and dry runs."""
 
 import sys
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -29,9 +30,11 @@ def workspace(tmp_path, monkeypatch):
     cache = tmp_path / "asset_country.json"
     cache.write_text('{"1": "Deutschland"}', encoding="utf-8")
 
-    # Never reach Jira: every id the frame carries is already cached.
+    # Explicit refresh revalidates legacy values through a fake resolver.
     monkeypatch.setattr(
-        asset_country, "resolve_missing", lambda ids, cache, **kw: (cache, 0, 0)
+        backfill_country,
+        "resolve_asset_country_strict",
+        lambda object_id, **kw: "Deutschland",
     )
     return source, cache
 
@@ -79,11 +82,17 @@ def test_retry_unknown_drops_cached_nulls(workspace, monkeypatch):
     cache.write_text('{"1": "Deutschland", "9": null}', encoding="utf-8")
     seen = {}
 
-    def spy(ids, current, **kw):
-        seen.update(current)
-        return current, 0, 0
+    original_refresh = asset_country.refresh_countries
 
-    monkeypatch.setattr(asset_country, "resolve_missing", spy)
+    def spy(
+        frame: pd.DataFrame, **kwargs: Any
+    ) -> tuple[pd.DataFrame, asset_country.CountryCache, dict[str, int]]:
+        result, cache, stats = original_refresh(frame, **kwargs)
+        seen.update(cache.legacy_unverified)
+        assert stats["dropped"] == 1
+        return result, cache, stats
+
+    monkeypatch.setattr(backfill_country, "refresh_countries", spy)
 
     _run(
         monkeypatch,

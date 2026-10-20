@@ -6,14 +6,16 @@ import plotly.graph_objects as go  # Required for adding the custom text layer
 import streamlit as st
 from st_aggrid import AgGrid, GridOptionsBuilder
 
-from asset_country import NOT_RESOLVED, attach_country
+from asset_country import NOT_RESOLVED, attach_country, country_cache_status
 from asset_country import load_cache as load_country_cache
 from asset_country import refresh_countries, save_cache
 from cache_schema import CacheReadError, CacheSchemaError
+from country_cache import CountryCacheError
 from data_loading import CacheChangedError, cache_lock
 from data_loading import cache_revision as current_cache_revision
 from data_loading import load_data_snapshot, save_data_if_unchanged
 from data_transformation import enrich_jira_time_metrics
+from file_io import FileSnapshotChangedError
 from interactive import render_interactive
 from plotting import (
     apply_font,
@@ -527,6 +529,19 @@ with tab_ursprung:
 # -------------------------------
 with tab_countries:
     st.header("🌍 Aufteilung Länder")
+    try:
+        country_status = country_cache_status(
+            df_old, load_country_cache(path=paths.countries)
+        )
+        st.caption(
+            f"Länder-Cache: {country_status['stale']} veraltet, "
+            f"{country_status['unverified']} unbestätigt, {country_status['unresolved']} ungeklärt."
+        )
+    except (CountryCacheError, FileSnapshotChangedError, OSError):
+        st.warning(
+            "Länder-Cache konnte nicht gelesen werden. "
+            "Bitte Format prüfen oder Sicherung wiederherstellen."
+        )
 
     missing = [c for c in ("Land", "resolution_band") if c not in df.columns]
     if missing:
@@ -762,6 +777,9 @@ with tab_interactive:
                 help="Prüft alle gespeicherten Tickets mit leerem Ursprung in Jira, unabhängig vom gewählten Zeitraum und der Firma.",
             )
         with col_countries:
+            force_country_refresh = st.checkbox(
+                "Bekannte Länder erneut prüfen", key="country_force_refresh"
+            )
             refresh_countries_clicked = st.button(
                 "🌍 Länder aktualisieren",
                 help=(
@@ -786,33 +804,53 @@ with tab_interactive:
 
     if refresh_countries_clicked:
         try:
+            country_config = load_settings()
+            country_paths = country_config.paths
             # The whole cache, not the filtered view: a ticket outside the
             # current window still needs its Land, and rewriting only the
             # visible rows would leave the rest stale.
             with st.spinner("Assets werden aufgelöst und Länder neu zugeordnet …"):
-                cached_df, revision = load_data_snapshot(path=paths.tickets)
+                cached_df, revision = load_data_snapshot(
+                    path=country_paths.tickets, settings=country_config
+                )
                 before = (
                     cached_df["Land"]
                     if "Land" in cached_df.columns
                     else pd.Series(index=cached_df.index, dtype="object")
                 )
-                country_baseline = load_country_cache(path=paths.countries)
+                country_baseline = load_country_cache(
+                    path=country_paths.countries, settings=country_config
+                )
                 cached_df, cache, stats = refresh_countries(
-                    cached_df, cache=country_baseline, cache_path=paths.countries
+                    cached_df,
+                    cache=country_baseline,
+                    cache_path=country_paths.countries,
+                    force=force_country_refresh,
+                    settings=country_config,
                 )
                 # Asset countries do not depend on the ticket cache, and save_cache
                 # merges into the latest mapping, so keep them even if the ticket
                 # cache changed meanwhile; a retry then needs no new lookups.
                 cache = save_cache(
-                    cache, path=paths.countries, baseline=country_baseline
+                    cache,
+                    path=country_paths.countries,
+                    baseline=country_baseline,
+                    settings=country_config,
                 )
-                with cache_lock(paths.tickets):
-                    if current_cache_revision(paths.tickets) != revision:
+                with cache_lock(country_paths.tickets):
+                    if current_cache_revision(country_paths.tickets) != revision:
                         raise CacheChangedError(
                             "Cache wurde parallel geändert; bitte die Aktualisierung wiederholen."
                         )
-                    cached_df = attach_country(cached_df, cache)
-                    save_data_if_unchanged(cached_df, revision, path=paths.tickets)
+                    cached_df = attach_country(
+                        cached_df, cache, allow_legacy=True, settings=country_config
+                    )
+                    save_data_if_unchanged(
+                        cached_df,
+                        revision,
+                        path=country_paths.tickets,
+                        settings=country_config,
+                    )
             stats["rows"] = int((cached_df["Land"] != before).sum())
             stats["pending"] = int((cached_df["Land"] == NOT_RESOLVED).sum())
             st.session_state["country_sync_success"] = stats

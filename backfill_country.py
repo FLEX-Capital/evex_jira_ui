@@ -105,6 +105,11 @@ def main():
     parser.add_argument("--cache", default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
+        "--force-refresh",
+        action="store_true",
+        help="Refresh even fresh verified country values.",
+    )
+    parser.add_argument(
         "--retry-unknown",
         action="store_true",
         help=(
@@ -144,6 +149,8 @@ def main():
         retry_unknown=args.retry_unknown,
         cache=country_baseline,
         resolver=partial(resolve_asset_country_strict, settings=config),
+        force=args.force_refresh,
+        settings=config,
     )
     if stats["dropped"]:
         print(f"  dropped {stats['dropped']} null entries; they were re-resolved")
@@ -182,18 +189,16 @@ def main():
         print("Dry run - nothing written.")
         return
 
+    cache = save_cache(cache, args.cache, baseline=country_baseline, settings=config)
     with cache_lock(output):
         if cache_revision(output) != revision:
             raise CacheChangedError("Cache changed during country backfill; rerun.")
-        cache = save_cache(
-            cache, args.cache, baseline=country_baseline, settings=config
-        )
-        df = attach_country(df, cache)
+        df = attach_country(df, cache, allow_legacy=True, settings=config)
         # Same path test as write_pickle_atomically(), which routes the live cache
         # through save_data(). Comparing raw strings here instead would let
         # `--output ./data/jira_data.pkl` overwrite the cache with no backup.
         if os.path.abspath(output) == os.path.abspath(args.input):
-            backup = f"{args.input}.bak-{datetime.now(UTC):%Y%m%d-%H%M%S-%f}"
+            backup = f"{args.input}.bak-country-{datetime.now(UTC):%Y%m%d-%H%M%S-%f}"
             shutil.copy2(args.input, backup)
             print(f"Backup written to {backup}")
         write_pickle_atomically(df, output, settings=config)

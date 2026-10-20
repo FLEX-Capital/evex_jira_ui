@@ -89,8 +89,16 @@ class CountryRefreshUITests(unittest.TestCase):
             patch("asset_country.load_cache", return_value={}),
             patch("asset_country.save_cache", side_effect=lambda cache, **kw: cache),
             patch(
-                "asset_country.resolve_asset_country_strict",
-                lambda object_id, **kwargs: "Österreich",
+                "asset_country.fetch_country_asset",
+                lambda identity, **kwargs: {
+                    "id": identity.object_id,
+                    "attributes": [
+                        {
+                            "objectTypeAttribute": {"name": "Land"},
+                            "objectAttributeValues": [{"displayValue": "Österreich"}],
+                        }
+                    ],
+                },
             ),
             patch("interactive.render_interactive"),
         ):
@@ -100,6 +108,7 @@ class CountryRefreshUITests(unittest.TestCase):
             app.sidebar.date_input[0].set_value(
                 (date(2026, 9, 1), date(2026, 9, 10))
             ).run()
+            app.checkbox(key="country_force_refresh").check().run()
             buttons = [b for b in app.button if "Länder" in b.label]
             self.assertEqual(len(buttons), 1, "Länder button missing")
             buttons[0].click().run()
@@ -114,15 +123,15 @@ class CountryRefreshUITests(unittest.TestCase):
         frame = self._frame()
         cache = {}
 
-        def boom(object_id):
-            raise RuntimeError("403")
+        def boom(identity, **kwargs):
+            raise PermissionError("403")
 
         with (
             patch("data_loading.load_data", return_value=frame),
             patch("data_loading.save_data"),
             patch("asset_country.load_cache", return_value=cache),
             patch("asset_country.save_cache", side_effect=lambda cache, **kw: cache),
-            patch("jira_country_export.resolve_asset_country_strict", boom),
+            patch("asset_country.fetch_country_asset", boom),
             patch("interactive.render_interactive"),
         ):
             app = AppTest.from_file("app.py", default_timeout=60).run()
@@ -226,7 +235,10 @@ class StaleCountryRefreshUITests(unittest.TestCase):
             self.assertTrue(any("parallel" in e.value for e in app.error))
             # Resolved lookups are kept so a retry needs no new Assets calls.
             save.assert_called_once_with(
-                resolved, path=load_settings().paths.countries, baseline={}
+                resolved,
+                path=load_settings().paths.countries,
+                baseline={},
+                settings=load_settings(),
             )
             save_tickets.assert_not_called()
 

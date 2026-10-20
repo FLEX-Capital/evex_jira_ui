@@ -31,7 +31,14 @@ from data_loading import (
     load_data,
     save_data,
 )
-from file_io import AtomicWriteError, Revision, atomic_write, path_lock
+from file_io import (
+    AtomicWriteError,
+    FileSnapshotChangedError,
+    Revision,
+    atomic_write,
+    path_lock,
+    read_file_snapshot,
+)
 from service_desks import BY_KEY
 from settings import DataPaths, SettingsError, load_settings
 
@@ -48,13 +55,10 @@ class MigrationPlan:
 
 
 def _snapshot(path: Path) -> tuple[bytes, Revision, pd.DataFrame]:
-    with path.open("rb") as handle:
-        before = os.fstat(handle.fileno())
-        payload = handle.read()
-        after = os.fstat(handle.fileno())
-    revision = (before.st_ino, before.st_size, before.st_mtime_ns)
-    if revision != (after.st_ino, after.st_size, after.st_mtime_ns):
-        raise CacheChangedError("cache_changed_during_inspection")
+    try:
+        payload, revision = read_file_snapshot(path)
+    except FileSnapshotChangedError:
+        raise CacheChangedError("cache_changed_during_inspection") from None
     try:
         # Trusted locally generated pickle only; inspection is not a sandbox
         # for deserializing artifacts supplied by third parties.

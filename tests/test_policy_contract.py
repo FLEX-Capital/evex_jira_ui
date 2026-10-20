@@ -128,7 +128,6 @@ def test_asset_cache_default_call_is_scoped_to_the_full_tenant(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Default argument resolution must happen before tenant-aware cache lookup."""
-    getattr(jira_loader.fetch_asset_object, "cache_clear")()
     fetch = Mock(side_effect=lambda url, **kw: {"id": "41", "source": url})
     monkeypatch.setattr(jira_loader, "jira_request", fetch)
     first = jira_loader.fetch_asset_object(object_id="41")
@@ -153,10 +152,17 @@ def test_legacy_caches_cannot_be_relabelled_as_another_tenant(
     monkeypatch.setenv("JIRA_WORKSPACE_ID", "11111111-1111-4111-8111-111111111111")
     with pytest.raises(SettingsError, match="tenant"):
         data_loading.load_data()
-    assert asset_country.load_cache() == {}
-    with pytest.raises(SettingsError, match="tenant"):
-        asset_country.save_cache({"41": "Österreich"})
+    countries = asset_country.load_cache()
+    assert not countries.entries and countries.legacy_unverified == {
+        "41": "Deutschland"
+    }
     assert country.read_bytes() == original
+    # Explicit metadata publication remains unverified under every tenant.
+    countries = asset_country.save_cache({"41": "Österreich"})
+    assert not countries.entries and countries.legacy_unverified == {"41": "Österreich"}
+    assert any(
+        path.read_bytes() == original for path in tmp_path.glob("*.bak-country-*")
+    )
     separate = tmp_path / "new-tenant.pkl"
     data_loading.save_data(pd.DataFrame([{"key": "SDAX-2"}]), path=separate)
     assert data_loading.load_data(path=separate).key.tolist() == ["SDAX-2"]

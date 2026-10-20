@@ -2,30 +2,37 @@
 
 Escalation order is Ansprechpartner -> Filiale -> Zentrale; the first asset
 carrying a "Land" attribute wins. Lookups go through an on-disk cache, so the
-Assets API is never touched during a Streamlit rerun - only the backfill
-script resolves ids.
+Assets API is never touched during a Streamlit rerun; only explicit maintenance
+resolves ids.
 """
 
-import json
 import math
-import os
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
+from pathlib import Path
 from typing import Any, Literal
 
 import pandas as pd
 import requests
 
 import service_desks as desks
-from country_cache import AssetIdentity
-from file_io import write_json_atomic
+from country_cache import (
+    AssetIdentity,
+    CountryCache,
+    CountryEntry,
+    choose_country_entry,
+    is_country_fresh,
+    load_country_cache,
+    merge_country_entries,
+)
 from http_policy import COUNTRY, RetryDeferred, with_retries
 from settings import (
     DEFAULT_TENANT,
+    TENANT_ATTR,
     Settings,
     SettingsError,
     TenantIdentity,
@@ -338,53 +345,37 @@ def resolve_asset_country_strict(
     return lookup.country
 
 
-def load_cache(path=None, *, settings=None):
-    """Return {object_id: country_or_None}; {} when the file is absent."""
+def _as_country_cache(cache: CountryCache | Mapping[str, str | None]) -> CountryCache:
+    return cache if isinstance(cache, CountryCache) else CountryCache({}, dict(cache))
+
+
+def load_cache(
+    path: str | Path | None = None, *, settings: Settings | None = None
+) -> CountryCache:
+    """Load typed country state; bare legacy values remain unverified metadata."""
     config = settings or load_settings()
-    if config.tenant != DEFAULT_TENANT:
-        return {}
-    path = config.paths.countries if path is None else path
-    if not os.path.exists(path):
-        return {}
-    with open(path, encoding="utf-8") as handle:
-        return json.load(handle)
+    return load_country_cache(config.paths.countries if path is None else Path(path))
 
 
-def save_cache(cache, path=None, *, baseline=None, settings=None):
-    """Merge a job's changes under a shared lock, then atomically replace.
-
-    A baseline lets retries remove old nulls without erasing another job's
-    successful resolution. Unchanged baseline entries are never written back.
-    """
-    from data_loading import cache_lock
-
+def save_cache(
+    cache: CountryCache | Mapping[str, str | None],
+    path: str | Path | None = None,
+    *,
+    baseline: CountryCache | Mapping[str, str | None] | None = None,
+    settings: Settings | None = None,
+) -> CountryCache:
+    """Merge verified identities and explicit legacy metadata outside ticket locks."""
     config = settings or load_settings()
-    if config.tenant != DEFAULT_TENANT:
-        raise SettingsError(
-            "country_tenant_schema_required", ("JIRA_CLOUD_ID", "JIRA_WORKSPACE_ID")
-        )
-    path = config.paths.countries if path is None else path
-    with cache_lock(path):
-        current = load_cache(path, settings=config)
-        if baseline is None:
-            current.update(cache)
-        else:
-            missing = object()
-            for key in baseline.keys() | cache.keys():
-                before = baseline.get(key, missing)
-                after = cache.get(key, missing)
-                if before == after or current.get(key, missing) != before:
-                    continue
-                if after is missing:
-                    current.pop(key, None)
-                else:
-                    current[key] = after
-        _write_cache(current, path)
-        return current
-
-
-def _write_cache(cache, path):
-    write_json_atomic(path, cache)
+    prepared = _as_country_cache(cache)
+    original = (
+        _as_country_cache(baseline).legacy_unverified if baseline is not None else None
+    )
+    return merge_country_entries(
+        config.paths.countries if path is None else Path(path),
+        list(prepared.entries.values()),
+        legacy=prepared.legacy_unverified,
+        baseline=original,
+    )
 
 
 def resolve_missing(object_ids, cache, resolver=None, workers=4):
@@ -465,64 +456,267 @@ def collect_object_ids(df):
     return values
 
 
-def refresh_countries(
-    df,
-    cache_path=None,
-    retry_unknown=False,
-    resolver=None,
-    workers=4,
-    *,
-    cache=None,
-):
-    """Resolve unknown asset ids, then rewrite Land/land_quelle on every row.
-
-    Returns (df, cache, stats). The cache is NOT written - the caller decides,
-    so backfill_country's --dry-run can inspect the outcome without persisting
-    it. Both the CLI and the dashboard's Länder button go through here, so the
-    two cannot drift apart.
-
-    Supply cache to resolve against a captured baseline; that dictionary is
-    copied so it can later be passed unchanged to save_cache(baseline=...).
-
-    retry_unknown drops entries cached as None first. Those are ambiguous in
-    caches written before the strict resolver landed: a failed lookup and an
-    asset that genuinely carries no Land were stored identically, and
-    resolve_missing() skips any id already present.
-    """
-    cache = load_cache(cache_path) if cache is None else cache.copy()
-    dropped = 0
-    if retry_unknown:
-        stale = [key for key, value in cache.items() if value is None]
-        for key in stale:
-            del cache[key]
-        dropped = len(stale)
-
-    cache, resolved, failed = resolve_missing(
-        collect_object_ids(df), cache, resolver=resolver, workers=workers
-    )
-    stats = {"dropped": dropped, "resolved": resolved, "failed": failed}
-    return attach_country(df, cache), cache, stats
+def _tenant_for_frame(frame: pd.DataFrame) -> TenantIdentity | None:
+    value = frame.attrs.get(TENANT_ATTR)
+    if isinstance(value, dict) and all(
+        isinstance(value.get(key), str) for key in ("cloud_id", "workspace_id")
+    ):
+        return TenantIdentity(value["cloud_id"], value["workspace_id"])
+    return None
 
 
-def attach_country(df, cache):
-    """Return a copy of df with 'Land' and 'land_quelle' columns added."""
-    out = df.copy()
-    blank = pd.Series("", index=out.index, dtype="object")
-    columns = [
-        out[name] if name in out.columns else blank for name in ESCALATION_COLUMNS
-    ]
-    pairs = [classify_country(a, f, z, cache) for a, f, z in zip(*columns, strict=True)]
-    if "asset_references" in out:
-        for position, references in enumerate(out["asset_references"]):
-            if isinstance(references, list) and any(
-                reference.get("provenance") == "rejected" for reference in references
-            ):
-                if pairs[position][0] in (
-                    NO_ASSETS_LINKED,
-                    NO_COUNTRY_ON_ASSET,
-                    NOT_RESOLVED,
+def _row_references(
+    row: pd.Series, tenant: TenantIdentity | None, *, allow_legacy: bool
+) -> tuple[list[tuple[str, AssetIdentity | None]], bool]:
+    records = row.get("asset_references")
+    references: list[tuple[str, AssetIdentity | None]] = []
+    unverified = False
+    if isinstance(records, list):
+        for record in records:
+            source = record.get("source")
+            if source not in ESCALATION_COLUMNS:
+                continue
+            identity = None
+            if record.get("provenance") == "modern":
+                candidate = AssetIdentity(
+                    record.get("cloud_id"),
+                    record.get("workspace_id"),
+                    record.get("object_id"),
+                )
+                if all(
+                    isinstance(value, str) and value
+                    for value in (
+                        candidate.cloud_id,
+                        candidate.workspace_id,
+                        candidate.object_id,
+                    )
+                ) and (
+                    tenant is None
+                    or (candidate.cloud_id, candidate.workspace_id)
+                    == (tenant.cloud_id, tenant.workspace_id)
                 ):
-                    pairs[position] = (NOT_RESOLVED, NO_SOURCE)
+                    identity = candidate
+            elif record.get("provenance") == "legacy_unverified":
+                unverified = True
+                if allow_legacy and tenant is not None:
+                    identity = parse_asset_reference(
+                        record.get("object_id"), tenant=tenant, legacy=True
+                    )
+            references.append((source, identity))
+    else:
+        for source in ESCALATION_COLUMNS:
+            object_id = normalise_object_id(row.get(source))
+            if object_id is not None:
+                unverified = True
+                references.append(
+                    (
+                        source,
+                        (
+                            parse_asset_reference(object_id, tenant=tenant, legacy=True)
+                            if allow_legacy and tenant
+                            else None
+                        ),
+                    )
+                )
+    return references, unverified
+
+
+def attach_country(
+    df: pd.DataFrame,
+    cache: CountryCache | Mapping[str, str | None],
+    *,
+    allow_legacy: bool = False,
+    settings: Settings | None = None,
+) -> pd.DataFrame:
+    """Attach verified matching countries without refreshing or guessing legacy ownership.
+
+    Stored legacy Land remains visible on ordinary reads. Only explicit
+    maintenance enables legacy references after tenant-scoped revalidation.
+    """
+    out = df.copy()
+    cache = _as_country_cache(cache)
+    tenant = settings.tenant if settings else _tenant_for_frame(df)
+    pairs = []
+    for _, row in out.iterrows():
+        references, unverified = _row_references(row, tenant, allow_legacy=allow_legacy)
+        stored = row.get("Land")
+        if (
+            unverified
+            and not allow_legacy
+            and isinstance(stored, str)
+            and stored.strip()
+        ):
+            pairs.append(
+                (
+                    stored,
+                    (
+                        row.get("land_quelle")
+                        if isinstance(row.get("land_quelle"), str)
+                        else NO_SOURCE
+                    ),
+                )
+            )
+            continue
+        outcomes = {
+            identity: CountryLookup(identity, entry.outcome, entry.country, None)
+            for _, identity in references
+            if identity is not None
+            and (entry := cache.entries.get(identity)) is not None
+        }
+        selected = select_country(references, outcomes)
+        pairs.append((selected.country, selected.source))
     out["Land"] = [country for country, _ in pairs]
     out["land_quelle"] = [source for _, source in pairs]
     return out
+
+
+def _reference_status(
+    references: Sequence[Sequence[tuple[str, AssetIdentity | None]]],
+    cache: CountryCache,
+    *,
+    now: datetime,
+) -> dict[str, int]:
+    identities = {
+        identity
+        for group in references
+        for _, identity in group
+        if identity is not None
+    }
+    return {
+        "stale": sum(
+            identity in cache.entries
+            and not is_country_fresh(cache.entries[identity], now=now)
+            for identity in identities
+        ),
+        "unverified": sum(identity not in cache.entries for identity in identities),
+        "unresolved": sum(
+            identity is None for group in references for _, identity in group
+        ),
+    }
+
+
+def country_cache_status(
+    df: pd.DataFrame,
+    cache: CountryCache | Mapping[str, str | None],
+    *,
+    settings: Settings | None = None,
+    now: datetime | None = None,
+) -> dict[str, int]:
+    """Count selected stale/unverified asset identities and rejected references offline."""
+    config = settings or load_settings()
+    references = [
+        _row_references(row, config.tenant, allow_legacy=True)[0]
+        for _, row in df.iterrows()
+    ]
+    return _reference_status(
+        references, _as_country_cache(cache), now=now or datetime.now(UTC)
+    )
+
+
+def refresh_countries(
+    df: pd.DataFrame,
+    cache_path: str | Path | None = None,
+    retry_unknown: bool = False,
+    resolver: Callable[[str], str | None] | None = None,
+    workers: int = 4,
+    *,
+    cache: CountryCache | Mapping[str, str | None] | None = None,
+    force: bool = False,
+    now: Callable[[], datetime] | None = None,
+    settings: Settings | None = None,
+) -> tuple[pd.DataFrame, CountryCache, dict[str, int]]:
+    """Prepare explicit refresh results; callers merge countries then patch tickets.
+
+    Failure never replaces a verified value. Rerenders only use attach_country;
+    they cannot invoke this network boundary as an incidental cache read.
+    """
+    config = settings or load_settings()
+    marker = df.attrs.get(TENANT_ATTR)
+    if marker is None and config.tenant != DEFAULT_TENANT:
+        raise SettingsError(
+            "legacy_tenant_unknown", ("JIRA_CLOUD_ID", "JIRA_WORKSPACE_ID")
+        )
+    if marker is not None and marker != config.tenant.as_dict():
+        raise SettingsError("tenant_mismatch", ("JIRA_CLOUD_ID", "JIRA_WORKSPACE_ID"))
+    clock = now or (lambda: datetime.now(UTC))
+    requested_at = clock()
+    current = (
+        load_cache(cache_path, settings=config)
+        if cache is None
+        else _as_country_cache(cache)
+    ).copy()
+    references = [
+        _row_references(row, config.tenant, allow_legacy=True)[0]
+        for _, row in df.iterrows()
+    ]
+    identities = {
+        identity
+        for group in references
+        for _, identity in group
+        if identity is not None
+    }
+    pending = sorted(
+        (
+            identity
+            for identity in identities
+            if force
+            or (entry := current.entries.get(identity)) is None
+            or not is_country_fresh(entry, now=requested_at)
+            or (retry_unknown and entry.outcome == "no_country")
+        ),
+        key=lambda identity: (
+            identity.cloud_id,
+            identity.workspace_id,
+            identity.object_id,
+        ),
+    )
+    dropped = 0
+    if retry_unknown:
+        for key in list(current.legacy_unverified):
+            if current.legacy_unverified[key] is None:
+                current.legacy_unverified.pop(key)
+                dropped += 1
+
+    def lookup(identity: AssetIdentity) -> CountryLookup:
+        if resolver is None:
+            return resolve_country(
+                identity, fetch=partial(fetch_country_asset, settings=config)
+            )
+        try:
+            value = resolver(identity.object_id)
+            if value is not None and not isinstance(value, str):
+                return CountryLookup(identity, "failed", None, "invalid_payload")
+            value = value.strip() or None if value is not None else None
+            return CountryLookup(
+                identity, "found" if value else "no_country", value, None
+            )
+        except Exception as exc:
+            return CountryLookup(identity, "failed", None, _country_error_code(exc))
+
+    failed = resolved = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for identity, outcome in zip(pending, pool.map(lookup, pending), strict=True):
+            if outcome.outcome not in ("found", "no_country"):
+                failed += 1
+                continue
+            entry = CountryEntry(
+                identity,
+                "found" if outcome.outcome == "found" else "no_country",
+                outcome.country,
+                clock(),
+            )
+            current.entries[identity] = choose_country_entry(
+                current.entries.get(identity), entry
+            )
+            resolved += 1
+    stats = {
+        "dropped": dropped,
+        "resolved": resolved,
+        "failed": failed,
+        **_reference_status(references, current, now=requested_at),
+    }
+    return (
+        attach_country(df, current, allow_legacy=True, settings=config),
+        current,
+        stats,
+    )

@@ -8,11 +8,50 @@ import subprocess
 import sys
 from multiprocessing.synchronize import Event
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize("mutation", ["replacement", "inplace"])
+def test_file_snapshot_uses_one_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    """A read binds bytes/stat to one inode and rejects concurrent in-place edits."""
+    from file_io import FileSnapshotChangedError, read_file_snapshot
+
+    target = tmp_path / "state.json"
+    target.write_bytes(b"old")
+    info = target.stat()
+    revision = (info.st_ino, info.st_size, info.st_mtime_ns)
+    original_open = Path.open
+
+    def open_file(path: Path, *args: Any, **kwargs: Any) -> Any:
+        handle = original_open(path, *args, **kwargs)
+        if path == target and args and args[0] == "rb":
+            original_read = handle.read
+
+            def read(*read_args: Any) -> bytes:
+                payload = original_read(*read_args)
+                if mutation == "replacement":
+                    replacement = tmp_path / "replacement"
+                    replacement.write_bytes(b"new artifact")
+                    replacement.replace(target)
+                else:
+                    target.write_bytes(b"different sized artifact")
+                return payload
+
+            monkeypatch.setattr(handle, "read", read)
+        return handle
+
+    monkeypatch.setattr(Path, "open", open_file)
+    if mutation == "replacement":
+        assert read_file_snapshot(target) == (b"old", revision)
+    else:
+        with pytest.raises(FileSnapshotChangedError):
+            read_file_snapshot(target)
 
 
 @pytest.mark.parametrize("failure", ["serialize", "flush", "fsync", "replace"])
