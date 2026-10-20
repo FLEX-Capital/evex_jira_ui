@@ -1,7 +1,11 @@
 import json
+from datetime import timedelta
+from pathlib import Path
+from unittest.mock import Mock
 
 import pandas as pd
-from test_sync_service import raw, request
+import pytest
+from test_sync_service import END, START, raw, request
 
 import desk_sync
 import source_sync
@@ -43,3 +47,25 @@ def test_only_explicit_source_policy_repairs_missing_origins(storage, monkeypatc
     assert report.complete and report.source_updates == 1
     assert pd.read_pickle(storage).loc[0, "source"] == "Telefon"
     assert queried == ["SDAX-1"]
+
+
+def test_merge_and_resume_keep_newer_raw_snapshot(
+    storage: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Partial resume and ordinary refresh use identical UTC recency rules."""
+    old, new = raw(), raw()
+    old["fields"]["updated"] = "2026-09-01T12:00:00+02:00"
+    new["fields"]["updated"] = "2026-09-01T11:00:00Z"
+    old["fields"]["summary"] = "older"
+    new["fields"]["summary"] = "newer"
+    store = sync_checkpoints.CheckpointStore(storage.parent / "resume")
+    store.begin_partial("SDAX", START, END)([new, old])
+    loaded, _, _ = store.load_partial("SDAX", START)
+    assert loaded == [new]
+    store.fetch_jira_issues = Mock(return_value=[old])
+    assert store.fetch_project("SDAX", START, END + timedelta(days=1), True) == [new]
+    monkeypatch.setattr(
+        sync_checkpoints, "fetch_jira_issues", lambda *a, **k: [old, new]
+    )
+    assert desk_sync.run_sync(request(projects=["SDAX"])).complete
+    assert pd.read_pickle(storage).loc[0, "summary"] == "newer"

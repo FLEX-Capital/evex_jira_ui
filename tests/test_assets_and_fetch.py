@@ -348,5 +348,40 @@ class TrimTests(unittest.TestCase):
     def test_dedupe_still_sees_the_updated_timestamp(self):
         trimmed = loader.trim_issue(self._full_issue())
         self.assertEqual(
-            loader._issue_updated_ts(trimmed), "2026-08-02T00:00:00.000+0000"
+            loader._issue_updated_ts(trimmed), datetime(2026, 8, 2, tzinfo=UTC)
         )
+
+
+def test_dedupe_compares_instants_not_strings() -> None:
+    """UTC instants govern winners, with stable order and later-input ties."""
+    old = {"key": "SDAX-1", "fields": {"updated": "2026-09-01T12:00:00+02:00"}}
+    new = {"key": "SDAX-1", "fields": {"updated": "2026-09-01T11:00:00Z"}}
+    second = {"key": "SDAX-2", "fields": {"updated": "2026-09-01T11:00:00Z"}}
+    assert loader.dedupe_issues([old, second, new, {"fields": {}}]) == [new, second]
+    for first_time, last_time in [
+        ("2026-09-01T11:00:00Z", "2026-09-01T11:00:00+00:00"),
+        ("2026-09-01T11:00:00.100000Z", "2026-09-01T11:00:00.1Z"),
+    ]:
+        first = {"key": "SDAX-1", "fields": {"updated": first_time}, "summary": "old"}
+        last = {"key": "SDAX-1", "fields": {"updated": last_time}, "summary": "last"}
+        assert loader.dedupe_issues([first, last]) == [last]
+
+
+def test_unknown_recency_cannot_replace_valid_snapshot() -> None:
+    """Unknown recency loses to valid recency and ties choose later input."""
+    valid = {"key": "SDAX-1", "fields": {"updated": "2026-09-01T11:00:00Z"}}
+    invalid: tuple[object, ...] = (
+        None,
+        "",
+        "garbage",
+        42,
+        [],
+        {},
+        "2026-09-01T11:00:00",
+    )
+    for bad in invalid:
+        unknown = {"key": "SDAX-1", "fields": {"updated": bad}}
+        assert loader.dedupe_issues([valid, unknown]) == [valid]
+        assert loader.dedupe_issues([unknown, valid]) == [valid]
+        later = {"key": "SDAX-1", "fields": {}, "summary": "later"}
+        assert loader.dedupe_issues([unknown, later]) == [later]

@@ -1,8 +1,10 @@
 import json
 import os
 import re
-from datetime import timedelta
+from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from functools import cache
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import requests
@@ -247,9 +249,19 @@ def enrich_issue_assets(issue, *, category_resolver=None):
     return result
 
 
-def _issue_updated_ts(issue):
-    """Sort key for 'recency': the issue's fields.updated (ISO 8601) or ''."""
-    return issue.get("fields", {}).get("updated") or ""
+def _issue_updated_ts(issue: Mapping[str, Any]) -> datetime | None:
+    """Return an aware UTC update instant, or unknown for invalid recency."""
+    fields = issue.get("fields")
+    value = fields.get("updated") if isinstance(fields, Mapping) else None
+    if not isinstance(value, str):
+        return None
+    try:
+        stamp = datetime.fromisoformat(value)
+        if stamp.tzinfo is None:
+            return None
+        return stamp.astimezone(UTC)
+    except (ValueError, OverflowError):
+        return None
 
 
 def dedupe_issues(issues, key_field="key"):
@@ -266,7 +278,12 @@ def dedupe_issues(issues, key_field="key"):
         if key is None:
             continue
         current = best.get(key)
-        if current is None or _issue_updated_ts(issue) >= _issue_updated_ts(current):
+        incoming_time = _issue_updated_ts(issue)
+        current_time = _issue_updated_ts(current) if current is not None else None
+        if current is None or (
+            current_time is None
+            or (incoming_time is not None and incoming_time >= current_time)
+        ):
             best[key] = issue
     return list(best.values())
 
