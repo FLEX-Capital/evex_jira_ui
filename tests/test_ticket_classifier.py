@@ -2,12 +2,17 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import httpx
 import pandas as pd
+import pytest
+from classification_env import forbid_model_network as forbid_model_network
 
 import ticket_classifier
+
+pytestmark = pytest.mark.usefixtures("forbid_model_network")
 
 
 def make_frame(keys, summary="Rechnung stornieren"):
@@ -23,7 +28,10 @@ def make_frame(keys, summary="Rechnung stornieren"):
     )
 
 
-def fake_classification(client, key, text, model=None):
+def fake_classification(
+    client: Any, key: str, text: str, model: str | None = None, **kwargs: Any
+) -> dict[str, Any]:
+    """Return a valid synthetic classification with token usage."""
     return {
         "key": key,
         "text_hash": ticket_classifier._hash_text(text),
@@ -122,9 +130,15 @@ class CacheTests(unittest.TestCase):
             cache = str(Path(tmp) / "c.parquet")
             frame = make_frame(["SDAX-1"])
 
-            def failing(client, key, text, model=None):
+            def failing(
+                client: Any,
+                key: str,
+                text: str,
+                model: str | None = None,
+                **kwargs: Any,
+            ) -> dict[str, Any]:
                 result = fake_classification(client, key, text, model)
-                result.update(resolution_bucket=None, error="http_529: overloaded")
+                result.update(resolution_bucket=None, error="connection")
                 return result
 
             with patch.object(ticket_classifier, "classify_one", side_effect=failing):

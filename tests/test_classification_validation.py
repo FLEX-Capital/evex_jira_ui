@@ -7,10 +7,13 @@ from unittest.mock import patch
 
 import pandas as pd
 import pytest
+from classification_env import forbid_model_network as forbid_model_network
 from pydantic import ValidationError
 from test_ticket_classifier import FakeClient, fake_classification, make_response
 
 import ticket_classifier as classifier
+
+pytestmark = pytest.mark.usefixtures("forbid_model_network")
 
 PAIRS = {
     "question_answer": ("how_to", "where_to_find", "policy_or_process_clarification"),
@@ -135,7 +138,11 @@ def test_one_bad_record_does_not_abort_valid_batch(tmp_path: Path) -> None:
             max_workers=1,
             progress=False,
         )
-    assert call.call_count == 2 and set(result.key) == {"SDAX-1", "SDAX-6"}
+    assert call.call_count == 2 and set(result.loc[result.error.isna(), "key"]) == {
+        "SDAX-1",
+        "SDAX-6",
+    }
+    assert set(result.loc[result.error.notna(), "key"]) == {"SDAX-4", "SDAX-5"}
     assert result.attrs["classification_errors"] == [
         {"index": 1, "code": "invalid_key"},
         {"index": 2, "code": "invalid_key"},

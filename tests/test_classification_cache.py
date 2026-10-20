@@ -14,6 +14,9 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from classification_env import forbid_model_network as forbid_model_network
+
+pytestmark = pytest.mark.usefixtures("forbid_model_network")
 
 NOW = datetime(2026, 10, 20, 12, tzinfo=UTC)
 
