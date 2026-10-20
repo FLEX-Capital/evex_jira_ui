@@ -16,10 +16,10 @@ Streamlit analytics dashboard for EVEX Jira service desks
 
 ## Hooks
 
-Two quality gates active in this project:
+Repository quality gates:
 
-| Layer       | Trigger         | Action                                        |
-| ----------- | --------------- | --------------------------------------------- |
-| git (trunk) | `git commit`    | `trunk fmt` and `trunk check` on staged files |
-| git (trunk) | `git push`      | `trunk check` — blocks on lint failures       |
-| Claude Code | file edit/write | `trunk fmt` on the changed file               |
+| Layer       | Trigger         | Action                                                      |
+| ----------- | --------------- | ----------------------------------------------------------- |
+| git (trunk) | `git commit`    | Native Ruff/mypy on isolated index bytes, plus Trunk checks |
+| git (trunk) | `git push`      | `trunk check` — blocks on lint failures                     |
+| Claude Code | file edit/write | `trunk fmt` on the changed file                             |

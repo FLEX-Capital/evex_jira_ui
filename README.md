@@ -60,8 +60,7 @@ against the project directory, regardless of the shell's working directory. Stat
 assets stay under project-relative `assets/`. Explicit CLI path flags keep their
 usual working-directory semantics. Jira tenant overrides are `JIRA_CLOUD_ID` and
 `JIRA_WORKSPACE_ID`; their defaults preserve the historical tenant, and another
-tenant cannot reuse an unproven legacy ticket/country cache. Versioned country
-persistence for another tenant is delivered by cleanup phase 4.
+tenant cannot reuse an unproven legacy ticket/country cache. Versioned country persistence isolates results by tenant and workspace.
 
 ## Euronet import
 
@@ -69,7 +68,7 @@ Euronet uses the existing Amparex custom-field IDs and `Fertig` completion logic
 It has no configured escalation targets. Generic issue links remain visible.
 Reporting retains Berlin time and weekdays 08:00–18:00. Holidays are the German
 public holidays for **Baden-Württemberg** (`subdiv="BW"`), set once in
-`_load_service_desk_issues` and therefore shared by every desk, Euronet included.
+`reporting_policy.py` and therefore shared by every desk, Euronet included.
 Beyond the federal holidays this adds Heilige Drei Könige, Fronleichnam and
 Allerheiligen; measured against the stored data it shifts business hours for
 about 2% of tickets and moves 12 across a reporting band.
@@ -280,7 +279,7 @@ later import replaces the shared status. The digest must match the raw file
 before using that metadata: publication errors can leave an older sidecar.
 
 ```sh
-uv run --frozen --no-sync --env-file .env python -m pytest -q
+uv run --frozen --no-sync python -m pytest -q
 ```
 
 Tests cover company subsets and Streamlit rendering, import timezone boundaries,
@@ -288,8 +287,8 @@ checkpoint reuse, partial failures, Assets routing, legacy transformation fixtur
 Euronet escalation flags, upsert behavior, and failed cache writes. They use
 synthetic records and replace external API calls; no live account is required.
 
-See [the implementation plan](docs/euronet-service-desk-plan.md) and
-[validation results](docs/euronet-validation.md) for the rollout record.
+See the [development guide](docs/development.md) for supported setup, shared
+architecture, offline validation and explicit maintenance procedures.
 Ticket artifacts store schema version 2 in `DataFrame.attrs`. Ordinary reads
 normalize unversioned/version 1 data in memory and preserve its bytes on disk.
 Corrupt, malformed and unsupported future schemas report an explicit error.

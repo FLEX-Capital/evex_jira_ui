@@ -12,7 +12,7 @@ This inventory records **40 findings**. Phase 0 implementation on 20 October
 2026 addresses **I01, I02, and I18 locally**; **37 original findings remain:
 19 P2 and 18 P3**. Deployment acceptance for I02 remains pending. One additional
 minor guard-validation issue (M01) is deferred, as recorded in the
-[phase 0 verification](superpowers/verification/2026-10-19-repository-cleanup-phase-0.md).
+phase 0 verification (optional local file `docs/superpowers/verification/2026-10-19-repository-cleanup-phase-0.md`).
 Each finding identifies current evidence, impact, a proposed change, and a way
 to validate that change. Architecture recommendations are proposals; application
 code changes are tracked separately by the cleanup roadmap. The evidence below
@@ -425,7 +425,7 @@ analysis, and reruns identify the exact input cohort.
 
 ### I21 P2 Dependency sources duplicate and diverge across CI and Docker
 
-**Evidence:** [requirements.txt:1](../requirements.txt#L1) and
+**Evidence:** `requirements.txt:1` (removed after the review) and
 [requirements.runtime.txt:1](../requirements.runtime.txt#L1) are identical.
 Docker installs the latter at [Dockerfile:9](../Dockerfile#L9); CI installs
 `pyproject.toml`/`uv.lock` at [.github/workflows/ci.yml:27](../.github/workflows/ci.yml#L27).
@@ -619,9 +619,9 @@ must not be removed as allegedly dead code.
 ### I32 P3 Supported analysis and historical experiments are not separated
 
 **Evidence:** four notebooks contain 1,767 code-source lines alongside the live
-application. [jira_analysis.ipynb:145](../jira_analysis.ipynb#L145) calls the
+application. [jira_analysis.ipynb:145](../analysis/archive/jira_analysis.ipynb#L145) calls the
 loader with obsolete arguments, including a duplicate `max_issues` value;
-[line 195](../jira_analysis.ipynb#L195) also passes an old client/JQL interface.
+[line 195](../analysis/archive/jira_analysis.ipynb#L195) also passes an old client/JQL interface.
 [build_board_deck.py:11](../build_board_deck.py#L11) intentionally embeds a
 historical numerical snapshot and contributes 1,116 root Python lines.
 

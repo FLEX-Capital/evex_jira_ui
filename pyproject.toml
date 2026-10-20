@@ -51,9 +51,7 @@ dev = [
   "types-tqdm>=4.70.0.20260906",
 ]
 
-# The suite is also runnable as `python -m unittest discover -s tests`, which puts
-# both the repo root and tests/ on sys.path. Mirror that for pytest so the two
-# runners agree and tests/ needs no __init__.py.
+# Pytest is the supported runner; shared legacy fixtures also import tests/ helpers.
 [tool.pytest.ini_options]
 pythonpath = [".", "tests"]
 addopts = "--cov --cov-report=term-missing -q"
