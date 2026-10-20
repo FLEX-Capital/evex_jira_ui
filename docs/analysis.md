@@ -11,3 +11,5 @@ Set `PROJECT`, `START_DATE` and inclusive `END_DATE` (Europe/Berlin); the defaul
 The manifest reports selected/excluded counts, the coherent local cache-read timestamp, source-artifact SHA-256, selected-input SHA-256 and classifier identity. The read timestamp does not establish Jira freshness. Concurrent replacement between load and hashing aborts safely; rerun with a stable cache. Key joins reject duplicates. Missing current results are counted explicitly rather than presented as classified tickets.
 
 `OUTPUT_DIR=None` writes no files. Choose an output directory explicitly to export only the manifest and aggregate category/intent CSVs. Do not save private ticket payloads into notebook execution outputs. Run `python tools/notebook_outputs.py --check` before committing any notebook.
+
+The offline smoke test runs a temporary notebook with a synthetic cache and fake classifier: `uv run --frozen --no-sync pytest tests/test_analysis_notebook.py --no-cov`. It needs local Jupyter kernel ports, blocks Requests and both HTTPX implementations, and never changes the tracked notebook. The directly declared nbclient, nbformat and ipykernel versions match the lock.

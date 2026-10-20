@@ -28,6 +28,9 @@ dependencies = [
 
 [dependency-groups]
 analysis = [
+  "ipykernel==7.3.0",
+  "nbclient==0.11.0",
+  "nbformat==5.11.1",
   "jupyter>=1.1.1",
   "openai>=2.38.0",
   "pyarrow>=24.0.0",
