@@ -274,3 +274,30 @@ synthetic records and replace external API calls; no live account is required.
 
 See [the implementation plan](docs/euronet-service-desk-plan.md) and
 [validation results](docs/euronet-validation.md) for the rollout record.
+Ticket artifacts store schema version 2 in `DataFrame.attrs`. Ordinary reads
+normalize unversioned/version 1 data in memory and preserve its bytes on disk.
+Corrupt, malformed and unsupported future schemas report an explicit error.
+Pickles remain trusted local artifacts; schema validation does not make
+third-party pickle files safe to open.
+
+Inspect a schema migration before applying it:
+
+```sh
+uv run --frozen --no-sync --env-file .env python cache_maintenance.py migrate --path data/jira_data.pkl
+```
+
+Review the printed versions, row count and revision. To apply, supply that exact
+revision as `INODE:SIZE:MTIME_NS` (the three printed integers joined with colons):
+
+```sh
+uv run --frozen --no-sync --env-file .env python cache_maintenance.py migrate --path data/jira_data.pkl --apply --expected-revision 'INODE:SIZE:MTIME_NS'
+```
+
+Apply acquires the import-operation lock before the ticket transaction lock,
+rechecks the source, creates an exact `.bak-schema-<UTC timestamp>` backup and
+then atomically publishes v2. A changed source, active import or failed backup
+prevents publication. Already-current data is a no-op. Exit codes are 0 for
+success, 2 for invalid/stale/busy input and 3 for I/O failure. No Jira/model calls
+occur. Use an explicit path under your configured `DATA_DIR` for mounted data.
+Stop all writers before rollback and restore the paired application version and
+untouched backup together; never run old/new schema writers on one directory.
