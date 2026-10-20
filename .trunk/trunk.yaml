@@ -42,6 +42,9 @@ lint:
     - taplo@0.10.0
     - trufflehog@3.99.2
   ignore:
+    # Unsupported historical source; the separate notebook output guard still applies.
+    - linters: [ruff, black, isort, mypy]
+      paths: [analysis/archive/**]
     - linters:
         - bandit
       paths:

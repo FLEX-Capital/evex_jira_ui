@@ -1,17 +1,10 @@
-"""Build the board-meeting deck for the Amparex AI-assistability analysis.
+"""Rebuild the frozen historical board aggregate snapshot offline.
 
-    uv run --group analysis --env-file .env python build_board_deck.py
-
-Produces ``amparex_ai_leverage_board.pptx``: ten 16:9 slides meant to be dragged
-into an existing board deck. Every chart is drawn from native PowerPoint shapes
-rather than an exported image, so the figures stay crisp when projected and
-anyone can restyle, recolour or delete a bar in PowerPoint without coming back
-here.
-
-The numbers are written out as literals so the deck rebuilds identically without
-a Jira or Azure round trip. They come from ``amparex_ai_assist_analysis.ipynb``
-over ``data/sdax_classifications.parquet``; regenerate them from the notebook if
-the classification is ever re-run.
+Run ``uv run --frozen --group analysis python build_board_deck.py``.
+The ten 16:9 slides use numerical literals and native PowerPoint shapes.
+See analysis/historical/board-provenance.json for source evidence and
+explicitly unknown original extraction/classifier identity. These literals
+remain historical; running the maintained notebook does not update them.
 """
 
 from pptx import Presentation

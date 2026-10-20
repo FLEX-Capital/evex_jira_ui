@@ -36,8 +36,8 @@ def test_default_dependencies_exclude_analysis_tools() -> None:
         "tqdm",
         "python-pptx",
         "pyarrow",
-        "python-dotenv",
     } <= _names(groups["analysis"])
+    assert "python-dotenv" not in _names(groups["analysis"])
     assert {"pytest", "pytest-cov", "httpx"} <= _names(groups["dev"])
 
 

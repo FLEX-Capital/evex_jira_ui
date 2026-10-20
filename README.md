@@ -341,3 +341,7 @@ failure or later concurrent change can stop partway and reports exact deleted
 and failed paths with a nonzero exit code. **Deletion is irreversible**; rolling
 application code back does not restore pruned backups. Real pruning requires a
 separate explicit invocation after candidate review.
+
+## Analysis
+
+Use the [supported analysis guide](docs/analysis.md) and the single maintained [analysis notebook](amparex_ai_assist_analysis.ipynb). Historical exploration lives in the [unsupported archive](analysis/archive/README.md).

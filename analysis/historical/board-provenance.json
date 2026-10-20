@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "project": "SDAX",
+  "code_revision": "0649d894c8e8b9cbf3d7bf8791567f90e59a449d",
+  "literal_snapshot": true,
+  "provenance_status": "legacy_unverified",
+  "original_extraction_timestamp": null,
+  "original_cohort_end": null,
+  "original_classifier_fingerprint": null,
+  "sources": [
+    {
+      "path": "build_board_deck.py",
+      "sha256": "9272b61805c984e3baa8c6488307651967c52776d56b09df6043c60dcbc4fc17"
+    },
+    {
+      "path": "amparex_ai_assist_analysis.ipynb",
+      "sha256": "3514c086e850032e07183231fc8487ef0f4dfc0d0faed0c7f3c587f2a416656c"
+    }
+  ],
+  "note": "Source hashes capture current preserved implementation evidence, not original extraction provenance."
+}
