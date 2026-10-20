@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pandas as pd
+import plotly.graph_objects as go
 import pytest
 from streamlit.testing.v1 import AppTest
 from test_sync_service import raw, request
@@ -31,24 +32,26 @@ def test_mixed_legacy_refresh_preserves_completed_cohorts(
         assert fig.layout.meta["completed"] == 2
         assert fig.layout.meta["unknown_completion_excluded"] == 0
         assert sum(int(n) for trace in fig.data for n in trace.y) == 2
-    seen: list[pd.DataFrame] = []
+    seen: list[go.Figure] = []
     with (
         patch("data_loading.load_data", return_value=combined),
         patch("interactive.render_interactive"),
         patch(
-            "plotting.create_toggle_chart",
-            side_effect=lambda df, **kw: (
-                seen.append(df.copy())
-                if kw.get("toggle_key") == "toggle_countries"
-                else None
-            ),
+            "streamlit.plotly_chart",
+            side_effect=lambda figure, **kw: seen.append(figure),
         ),
     ):
         app = AppTest.from_file("app.py", default_timeout=30).run()
         app.sidebar.date_input[0].set_value((date(2026, 9, 1), date(2026, 9, 10))).run()
         app.checkbox(key="land_include_open").uncheck().run()
     assert not app.exception
-    assert len(seen[-1]) == 2
+    country = [figure for figure in seen if figure.layout.xaxis.title.text == "Land"][
+        -1
+    ]
+    assert (
+        sum(int(n) for trace in country.data if trace.type == "bar" for n in trace.y)
+        == 2
+    )
     assert any("Abgeschlossen: 2" in c.value for c in app.caption)
     pd.testing.assert_frame_equal(combined, before)
 

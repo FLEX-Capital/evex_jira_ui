@@ -108,36 +108,22 @@ def test_status_customer_country_views_share_completion(
         )
         raws.append(value)
     frame = load_issues_Euronet(raws).drop(columns="completion_state")
-    seen: list[tuple[object, pd.DataFrame]] = []
+    figures: list[go.Figure] = []
 
-    def capture_chart(df: pd.DataFrame, **kwargs: object) -> None:
-        seen.append((kwargs.get("toggle_key"), df.copy()))
-
-    import plotly.express as px
-
-    original_bar = px.bar
-    bars: list[tuple[object, pd.DataFrame]] = []
-
-    def capture_bar(data_frame: pd.DataFrame, **kwargs: Any) -> go.Figure:
-        bars.append((kwargs.get("x"), data_frame.copy()))
-        return original_bar(data_frame, **kwargs)
+    def capture_figure(figure: go.Figure, **kwargs: Any) -> None:
+        figures.append(figure)
 
     with (
         patch("data_loading.load_data", return_value=frame),
         patch("interactive.render_interactive"),
-        patch("plotting.create_toggle_chart", side_effect=capture_chart),
-        patch.object(px, "bar", side_effect=capture_bar),
+        patch("streamlit.plotly_chart", side_effect=capture_figure),
     ):
         app = AppTest.from_file("app.py", default_timeout=30).run()
         app.sidebar.date_input[0].set_value((date(2026, 9, 1), date(2026, 9, 10))).run()
         assert not app.exception
         app.checkbox(key="land_include_open").uncheck().run()
         assert not app.exception
-    country = [df for key, df in seen if key == "toggle_countries"][-1]
-    assert country.key.tolist() == ["SDEU-1"]
-    assert country.completion_state.tolist() == ["done"]
-    status = [df for key, df in bars if key == "status_category"][-1]
-    customer = [df for key, df in bars if key == "zentrale"][-1]
-    assert int(status.key.sum()) == 1
-    assert int(customer.Anzahl.sum()) == 1
+    for label in ("Land", "Statuskategorie", "zentrale"):
+        figure = [f for f in figures if f.layout.xaxis.title.text == label][-1]
+        assert _bar_total(figure) == 1
     assert any("Unbekannter Abschlussstatus: 1" in c.value for c in app.caption)
