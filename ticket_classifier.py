@@ -256,14 +256,15 @@ def load_cache(cache_path=None):
 
 
 def save_cache(frame, cache_path=None):
-    from file_io import atomic_write
+    from file_io import atomic_write, path_lock
 
     cache_path = (
         load_settings().paths.classifications
         if cache_path is None
         else Path(cache_path)
     )
-    atomic_write(cache_path, lambda handle: frame.to_parquet(handle, index=False))
+    with path_lock(cache_path):
+        atomic_write(cache_path, lambda handle: frame.to_parquet(handle, index=False))
 
 
 def classify_one(client, key, text, model=None):

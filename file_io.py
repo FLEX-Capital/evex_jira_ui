@@ -88,12 +88,14 @@ def write_json_atomic(path: Path, value: object) -> None:
 
 
 @contextmanager
-def path_lock(path: Path) -> Iterator[None]:
-    """Serialize threads/processes using a stable sidecar, nesting by path."""
+def path_lock(path: Path, *, blocking: bool = True) -> Iterator[None]:
+    """Serialize threads/processes by path; optional refusal of active writers."""
     path = Path(path).resolve()
     with _registry_guard:
         mutex = _registry.setdefault(path, threading.RLock())
-    with mutex:
+    if not mutex.acquire(blocking=blocking):
+        raise BlockingIOError("path_busy")
+    try:
         held = getattr(_local, "held", None)
         if held is None:
             held = _local.held = set()
@@ -102,10 +104,12 @@ def path_lock(path: Path) -> Iterator[None]:
             return
         path.parent.mkdir(parents=True, exist_ok=True)
         with Path(f"{path}.lock").open("a+b") as handle:
-            fcntl.flock(handle, fcntl.LOCK_EX)
+            fcntl.flock(handle, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
             held.add(path)
             try:
                 yield
             finally:
                 held.remove(path)
                 fcntl.flock(handle, fcntl.LOCK_UN)
+    finally:
+        mutex.release()

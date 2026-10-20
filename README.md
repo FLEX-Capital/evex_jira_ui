@@ -301,3 +301,27 @@ success, 2 for invalid/stale/busy input and 3 for I/O failure. No Jira/model cal
 occur. Use an explicit path under your configured `DATA_DIR` for mounted data.
 Stop all writers before rollback and restore the paired application version and
 untouched backup together; never run old/new schema writers on one directory.
+Retention also starts with inspection:
+
+```sh
+uv run --frozen --no-sync --env-file .env python cache_maintenance.py cleanup --data-dir data
+```
+
+Review every candidate and its reason. Apply only that reviewed digest:
+
+```sh
+uv run --frozen --no-sync --env-file .env python cache_maintenance.py cleanup --data-dir data --apply --plan-digest 'PRINTED_DIGEST'
+```
+
+Cleanup keeps the ten newest recognized ticket backups by their encoded UTC
+timestamp and every backup at most 14 days old. Only older backups outside that
+union can be removed. Only recognized `.evex-atomic-<target>-<unique>.tmp` files
+strictly older than 24 hours are eligible. Current caches, raw/status files,
+checkpoints, partial recovery logs, locks, symlinks, subdirectories and unrelated
+filenames remain protected. Inspection creates no directories or lock files.
+Apply checks the complete inventory and active writers before deleting, then
+revalidates each separately locked family. A stale plan deletes nothing; an I/O
+failure or later concurrent change can stop partway and reports exact deleted
+and failed paths with a nonzero exit code. **Deletion is irreversible**; rolling
+application code back does not restore pruned backups. Real pruning requires a
+separate explicit invocation after candidate review.

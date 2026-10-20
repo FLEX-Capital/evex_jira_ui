@@ -50,13 +50,13 @@ def import_operation_lock(data_path=None):
 
 
 @contextmanager
-def cache_lock(path=None):
+def cache_lock(path=None, *, blocking=True):
     """Serialize read/merge/write transactions across threads and CLI processes.
 
     Lock a stable sidecar, not the pickle inode replaced by atomic saves. The
     thread lock plus nesting check makes save_data safe inside a transaction.
     """
-    with path_lock(_ticket_path(path)):
+    with path_lock(_ticket_path(path), blocking=blocking):
         yield
 
 
