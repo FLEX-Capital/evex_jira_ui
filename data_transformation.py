@@ -13,7 +13,7 @@ import reporting_policy as reporting
 import service_desks as desks
 from asset_country import attach_country, issue_asset_references, load_cache
 from country_cache import CountryCache
-from issue_links import clone_links, parse_issue_links
+from issue_links import LinkGraph, clone_links, parse_issue_links
 from resolution_bands import classify_bands
 from settings import DEFAULT_TENANT, TENANT_ATTR, Settings, load_settings
 
@@ -251,47 +251,42 @@ with load_settings().paths.category_map.open() as f:
     object_id_to_name = json.load(f)
 
 
-def load_clone_of_clone(key, *, settings=None):
-    clones = []
-    clone_types = []
-    try:
-        issue_raw = get_jira(settings).issue(key).raw
-        links = issue_raw["fields"].get("issuelinks", [])
-        for link in links:
-            if "outwardIssue" in link:
-                clone_key = link["outwardIssue"]["key"]
-                clone_type = link["type"]["name"]
-                clones.append(clone_key)
-                clone_types.append(clone_type)
-    except Exception as e:  # noqa: BLE001 - preserve optional link traversal
-        print(f"Error for clone_of_clone: {e!r}")
-    return ",".join(clones), ",".join(clone_types)
+def load_clone_of_clone(
+    key: str, *, link_graph: LinkGraph | None = None, settings: Settings | None = None
+) -> tuple[Any, Any]:
+    """Read known first-hop evidence without constructing any network client."""
+    if link_graph is None or key not in link_graph.by_key:
+        return pd.NA, pd.NA
+    outward = [link for link in link_graph.by_key[key] if link.direction == "outward"]
+    return ",".join(link.target_key for link in outward), ",".join(
+        link.type_name for link in outward
+    )
 
 
-def load_clones(links, *, settings=None):
-    clones = []
-    clone_types = []
-    clones_of_clones = []
-    clone_types_of_clones = []
-    try:
-        for link in links:
-            if "outwardIssue" in link:
-                clone_key = link["outwardIssue"]["key"]
-                clone_type = link["type"]["name"]
-                clones.append(clone_key)
-                clone_types.append(clone_type)
-                cc, ctc = load_clone_of_clone(clone_key, settings=settings)
-                clones_of_clones.append(cc)
-                clone_types_of_clones.append(ctc)
-    except Exception as e:  # noqa: BLE001 - preserve optional link traversal
-        print(f"Error for clones: {e!r}")
-
+def load_clones(
+    links: list[object] | None,
+    *,
+    link_graph: LinkGraph | None = None,
+    settings: Settings | None = None,
+) -> tuple[str, str, int, Any, Any]:
+    """Preserve generic outward-link compatibility from explicit evidence."""
+    outward = [
+        link
+        for link in parse_issue_links(links, deduplicate=False)
+        if link.direction == "outward"
+    ]
+    further = [
+        load_clone_of_clone(link.target_key, link_graph=link_graph) for link in outward
+    ]
+    unknown = any(pd.isna(keys) for keys, _ in further)
+    keys = ",".join(str(keys) for keys, _ in further if not pd.isna(keys))
+    types = ",".join(str(types) for _, types in further if not pd.isna(types))
     return (
-        ",".join(clones),
-        ",".join(clone_types),
-        len(clones),
-        ",".join(clones_of_clones),
-        ",".join(clone_types_of_clones),
+        ",".join(link.target_key for link in outward),
+        ",".join(link.type_name for link in outward),
+        len(outward),
+        keys if keys or not unknown else pd.NA,
+        types if types or not unknown else pd.NA,
     )
 
 
@@ -380,7 +375,7 @@ def _asset_label(issue, field_name, *, settings=None):
     return object_id_to_name.get(str(object_id), "Unbekannt")
 
 
-def _extract_issue(issue, comment_separator, *, settings=None):
+def _extract_issue(issue, comment_separator, *, settings=None, link_graph=None):
     config = settings or load_settings()
     fields = issue.get("fields") or {}
     asset_references = issue_asset_references(issue, tenant=config.tenant)
@@ -395,7 +390,7 @@ def _extract_issue(issue, comment_separator, *, settings=None):
     clones_only = clone_links(normalized)
     if links:
         clones, clone_types, n_clones, clones_of_clones, clone_types_of_clones = (
-            load_clones(links, settings=config)
+            load_clones(links, link_graph=link_graph)
         )
     else:
         clones = clone_types = clones_of_clones = clone_types_of_clones = ""
@@ -453,6 +448,11 @@ def _extract_issue(issue, comment_separator, *, settings=None):
         "filiale": escalation_cells.get("filiale", ""),
         "Link": _nested(fields, desks.FIELDS.request, "_links", "agent"),
         "clones_of_clones": clones_of_clones,
+        "link_enrichment_complete": all(
+            link_graph is not None and link.target_key in link_graph.by_key
+            for link in normalized
+            if link.direction == "outward"
+        ),
         "clone_types_of_clones": clone_types_of_clones,
         "Hauptkategorie": _asset_label(
             issue, desks.FIELDS.main_category, settings=config
@@ -472,14 +472,21 @@ def _load_service_desk_issues(
     comment_separator="\n--------------------------------\n",
     country_cache=None,
     settings=None,
+    link_graph=None,
 ):
     config = settings or load_settings()
     rows = [
-        _extract_issue(issue, comment_separator, settings=config)
+        _extract_issue(issue, comment_separator, settings=config, link_graph=link_graph)
         for issue in (issues or [])
     ]
     df = pd.DataFrame(
-        rows, columns=[*_ISSUE_COLUMNS, "Hauptkategorie", "Unterkategorie"]
+        rows,
+        columns=[
+            *_ISSUE_COLUMNS,
+            "Hauptkategorie",
+            "Unterkategorie",
+            "link_enrichment_complete",
+        ],
     )
     for column in ("created", "updated", "currentstatus_date"):
         df[column] = pd.to_datetime(
@@ -514,8 +521,15 @@ def _load_service_desk_issues(
         if clone_of_clone_project
         else False
     )
+    if clone_of_clone_project:
+        no_evidence = ~df["link_enrichment_complete"].astype("boolean").fillna(
+            False
+        ) & ~df["has_axt_clone_clone"].astype("boolean").fillna(False)
+        df["has_axt_clone_clone"] = (
+            df["has_axt_clone_clone"].astype("boolean").mask(no_evidence, pd.NA)
+        )
     for column in ("has_exax_clone", "has_axt_clone_clone"):
-        df[column] = df[column].fillna(False).astype(bool)
+        df[column] = df[column].astype("boolean" if df[column].isna().any() else bool)
     df.attrs[TENANT_ATTR] = config.tenant.as_dict()
     return df[["firma", *[column for column in df.columns if column != "firma"]]]
 
@@ -525,10 +539,15 @@ def load_issues(
     *,
     country_cache: CountryCache | Mapping[str, str | None] | None = None,
     settings: Settings | None = None,
+    link_graph: LinkGraph | None = None,
 ) -> pd.DataFrame:
     """Transform IPRO tickets using their registered desk policy."""
     return load_project_issues(
-        "SDIPR", issues, country_cache=country_cache, settings=settings
+        "SDIPR",
+        issues,
+        country_cache=country_cache,
+        settings=settings,
+        link_graph=link_graph,
     )
 
 
@@ -537,10 +556,15 @@ def load_issues_Amparex(
     *,
     country_cache: CountryCache | Mapping[str, str | None] | None = None,
     settings: Settings | None = None,
+    link_graph: LinkGraph | None = None,
 ) -> pd.DataFrame:
     """Transform Amparex tickets using their registered desk policy."""
     return load_project_issues(
-        "SDAX", issues, country_cache=country_cache, settings=settings
+        "SDAX",
+        issues,
+        country_cache=country_cache,
+        settings=settings,
+        link_graph=link_graph,
     )
 
 
@@ -549,10 +573,15 @@ def load_issues_Euronet(
     *,
     country_cache: CountryCache | Mapping[str, str | None] | None = None,
     settings: Settings | None = None,
+    link_graph: LinkGraph | None = None,
 ) -> pd.DataFrame:
     """Transform Euronet tickets using their registered desk policy."""
     return load_project_issues(
-        "SDEU", issues, country_cache=country_cache, settings=settings
+        "SDEU",
+        issues,
+        country_cache=country_cache,
+        settings=settings,
+        link_graph=link_graph,
     )
 
 
@@ -562,6 +591,7 @@ def load_project_issues(
     *,
     country_cache: CountryCache | Mapping[str, str | None] | None = None,
     settings: Settings | None = None,
+    link_graph: LinkGraph | None = None,
 ) -> pd.DataFrame:
     """Apply the registry's transformation and escalation policy for one desk."""
     try:
@@ -576,6 +606,7 @@ def load_project_issues(
         comment_separator=desk.comment_separator,
         country_cache=country_cache,
         settings=settings,
+        link_graph=link_graph,
     )
 
 

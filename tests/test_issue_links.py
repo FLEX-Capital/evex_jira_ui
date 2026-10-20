@@ -60,8 +60,7 @@ def test_legacy_generic_fields_keep_their_contract(storage: Path) -> None:
         {"type": {"name": "Cloners"}, "outwardIssue": {"key": "SOURCE-1"}},
         {"type": {"name": "Cloners"}, "outwardIssue": {"key": "AX-2"}},
     ]
-    with patch.object(transform, "load_clone_of_clone", return_value=("", "")):
-        row = transform.load_issues_Euronet([issue(links=links)]).iloc[0]
+    row = transform.load_issues_Euronet([issue(links=links)]).iloc[0]
     assert row.clones == "EXAX-1,SOURCE-1,AX-2"
     assert row.clone_types == "Blocks,Cloners,Cloners"
     assert row.n_clones == 3 and row.cloned_by == ""

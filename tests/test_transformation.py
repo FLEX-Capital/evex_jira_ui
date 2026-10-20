@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 import jira_loader
+from issue_links import IssueLink, LinkGraph
 
 
 def issue(
@@ -173,10 +174,12 @@ class TransformationTests(unittest.TestCase):
             assets_cloud_id=jira_loader.CLOUD_ID,
             asset_errors=["main-2: HTTP 403"],
         )
-        with patch.object(
-            self.transformation, "load_clone_of_clone", return_value=("AX-9", "Cloners")
-        ):
-            row = self.transformation.load_issues_Euronet([raw]).iloc[0]
+        row = self.transformation.load_issues_Euronet(
+            [raw],
+            link_graph=LinkGraph(
+                {"EXAX-7": (IssueLink("Cloners", "outward", "AX-9"),)}, ()
+            ),
+        ).iloc[0]
 
         self.assertEqual(row["firma"], "Euronet")
         self.assertEqual(row["request_type"], "Incident")
@@ -224,12 +227,10 @@ class TransformationTests(unittest.TestCase):
             {"type": {"name": "Relates"}, "outwardIssue": {"key": "OTHER-1"}},
             {"type": {"name": "Cloners"}, "inwardIssue": {"key": "SOURCE-1"}},
         ]
-        with patch.object(
-            self.transformation, "load_clone_of_clone", return_value=("", "")
-        ):
-            row = self.transformation.load_issues_Amparex(
-                [issue(key="SDAX-1", links=links)]
-            ).iloc[0]
+        row = self.transformation.load_issues_Amparex(
+            [issue(key="SDAX-1", links=links)],
+            link_graph=LinkGraph({"OTHER-1": ()}, ()),
+        ).iloc[0]
         self.assertEqual(row["cloned_by"], "")
 
     def test_old_desk_complete_fixtures_match_original_non_assets_behavior(self):
@@ -246,15 +247,13 @@ class TransformationTests(unittest.TestCase):
             ("load_issues_Amparex", issue(key="SDAX-1", links=links)),
         )
         for loader_name, raw in cases:
-            with (
-                self.subTest(loader=loader_name),
-                patch.object(
-                    self.transformation,
-                    "load_clone_of_clone",
-                    return_value=("AX-9", "Cloners"),
-                ),
-            ):
-                actual = getattr(self.transformation, loader_name)([raw])
+            with self.subTest(loader=loader_name):
+                actual = getattr(self.transformation, loader_name)(
+                    [raw],
+                    link_graph=LinkGraph(
+                        {"EXAX-7": (IssueLink("Cloners", "outward", "AX-9"),)}, ()
+                    ),
+                )
             columns = self.legacy_golden["columns"]
             expected_row = self.legacy_golden["rows"][loader_name]
             expected_dtypes = self.legacy_golden["dtypes"]

@@ -335,7 +335,7 @@ def test_raw_metadata_failure_is_reported_after_cache_commit(storage, monkeypatc
 
     monkeypatch.setattr(desk_sync, "write_json_atomic", fail_metadata)
     report = desk_sync.run_sync(request(projects=["SDAX"], publish_raw=True))
-    assert report.committed and report.raw_error == "OSError"
+    assert report.committed and report.raw_error == "raw_failed"
     assert not report.save_error and not report.complete
     assert (
         original["sha256"]

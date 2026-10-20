@@ -2,11 +2,12 @@
 
 import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
 from uuid import uuid4
 
 import pandas as pd
@@ -24,6 +25,8 @@ from category_sync import (
 )
 from file_io import atomic_write
 from file_io import write_json_atomic as write_json_atomic
+from issue_links import fetch_link_graph
+from operation_errors import OperationDiagnostic, safe_diagnostic
 from service_desks import BY_KEY, InvalidIssue
 from settings import DEFAULT_TENANT, TENANT_ATTR, load_settings
 
@@ -107,6 +110,8 @@ class SyncReport:
     errors: dict = field(default_factory=dict)
     asset_failures: dict = field(default_factory=dict)
     invalid_rows: dict[str, int] = field(default_factory=dict)
+    link_failures: dict[str, int] = field(default_factory=dict)
+    diagnostics: list[OperationDiagnostic] = field(default_factory=list)
     rows: int = 0
     protected_rows: int = 0
     categories: CategoryRepairReport = field(default_factory=CategoryRepairReport)
@@ -123,6 +128,8 @@ class SyncReport:
             self.errors
             or any(self.asset_failures.values())
             or any(self.invalid_rows.values())
+            or any(self.link_failures.values())
+            or self.diagnostics
             or self.categories.unresolved_cells
             or self.raw_error
             or self.source_error
@@ -189,6 +196,25 @@ def _keep_valid_category_labels(baseline, incoming, references, *, settings=None
                 and not unknown(prior.loc[key].get(label_col))
             ):
                 result.loc[index, label_col] = prior.loc[key, label_col]
+    return result
+
+
+def _keep_known_links(baseline: pd.DataFrame, incoming: pd.DataFrame) -> pd.DataFrame:
+    """Keep old second-hop evidence only while its direct links still match."""
+    if baseline.empty or incoming.empty or "link_enrichment_complete" not in incoming:
+        return incoming
+    previous = baseline.drop_duplicates("key", keep="last").set_index("key")
+    result = incoming.copy()
+    columns = ("clones_of_clones", "clone_types_of_clones", "has_axt_clone_clone")
+    for index, row in result.iterrows():
+        if bool(row["link_enrichment_complete"]) or row["key"] not in previous.index:
+            continue
+        old = previous.loc[row["key"]]
+        if row.get("issue_links") != old.get("issue_links"):
+            continue
+        for column in columns:
+            if column in old and pd.isna(row.get(column)) and not pd.isna(old[column]):
+                result.loc[index, column] = old[column]
     return result
 
 
@@ -274,7 +300,11 @@ def run_sync(request, *, progress=None, data_path=None):
     import data_loading
     import sync_checkpoints
     from data_transformation import load_project_issues
-    from source_sync import fetch_issue_sources, refresh_missing_sources
+    from source_sync import (
+        fetch_issue_fields,
+        fetch_issue_sources,
+        refresh_missing_sources,
+    )
 
     # Freeze paths before handing off a worker; never consult a mutable default later.
     config = load_settings()
@@ -304,7 +334,24 @@ def run_sync(request, *, progress=None, data_path=None):
             if progress:
                 progress({"phase": phase, "message": message, "project": project})
 
+        def diagnose(
+            exc: Exception,
+            stage: str,
+            project: str | None = None,
+            key: str | None = None,
+        ) -> str:
+            cause = safe_diagnostic(
+                exc,
+                operation_id=status["run_id"],
+                stage=stage,
+                project=project,
+                key=key,
+            )
+            report.diagnostics.append(cause)
+            return cause.code
+
         emit("Import wird gestartet", "admitted")
+        stage = "fetch"
         try:
             baseline, _ = data_loading.load_data_snapshot(
                 path=data_path, settings=config
@@ -322,8 +369,43 @@ def run_sync(request, *, progress=None, data_path=None):
                 report.invalid_rows[event.project] = (
                     report.invalid_rows.get(event.project, 0) + 1
                 )
+                report.diagnostics.append(
+                    OperationDiagnostic(
+                        status["run_id"],
+                        "transform",
+                        "invalid_created",
+                        project=event.project,
+                        key=event.key,
+                    )
+                )
+
+            link_fields: dict[str, Any] = {}
+            link_errors: dict[str, Exception] = {}
+
+            def fetch_links(keys: Sequence[str]) -> dict[str, Any]:
+                missing = [
+                    key
+                    for key in keys
+                    if key not in link_fields and key not in link_errors
+                ]
+                if missing:
+                    try:
+                        received = fetch_issue_fields(
+                            missing, ["issuelinks"], settings=config
+                        )
+                        for key in missing:
+                            link_fields[key] = received.get(key)
+                    except (
+                        Exception
+                    ) as exc:  # noqa: BLE001 - reuse a failed batch within this import
+                        for key in missing:
+                            link_errors[key] = exc
+                # fetch_link_graph handles each optional batch failure without dropping tickets.
+                # Return validated records individually so a previous failure does not hide peers.
+                return {key: link_fields[key] for key in keys if key in link_fields}
 
             for project in request.projects:
+                stage = "fetch"
                 try:
                     emit(
                         f"{BY_KEY[project].label}: Tickets werden geladen",
@@ -342,6 +424,29 @@ def run_sync(request, *, progress=None, data_path=None):
                             message, project=project
                         ),
                     )
+                    for value in issues:
+                        link_fields[value["key"]] = value.get("fields") or {}
+                        link_errors.pop(value["key"], None)
+                    graph = fetch_link_graph(
+                        issues, fetch_many=fetch_links, operation_id=status["run_id"]
+                    )
+                    causes = [
+                        (
+                            safe_diagnostic(
+                                link_errors[cause.key],
+                                operation_id=status["run_id"],
+                                stage="links",
+                                project=project,
+                                key=cause.key,
+                            )
+                            if cause.key in link_errors
+                            else cause
+                        )
+                        for cause in graph.diagnostics
+                    ]
+                    report.diagnostics.extend(causes)
+                    report.link_failures[project] = len(causes)
+                    stage = "transform"
                     _seed_category_context(issues, resolver, references)
                     if issues:
                         frames.append(
@@ -350,6 +455,7 @@ def run_sync(request, *, progress=None, data_path=None):
                                 issues,
                                 country_cache=country_cache,
                                 settings=config,
+                                link_graph=graph,
                             )
                         )
                     failures[project] = [
@@ -360,11 +466,12 @@ def run_sync(request, *, progress=None, data_path=None):
                     report.counts[project] = len(issues)
                     del issues
                 except Exception as exc:  # noqa: BLE001 - isolate a failed desk
-                    report.errors[project] = f"{type(exc).__name__}: {exc}"
+                    report.errors[project] = diagnose(exc, stage, project)
             if report.counts:
                 incoming = (
                     pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
                 )
+                incoming = _keep_known_links(baseline, incoming)
                 incoming = _keep_valid_category_labels(
                     baseline, incoming, references, settings=config
                 )
@@ -398,12 +505,13 @@ def run_sync(request, *, progress=None, data_path=None):
                                     )
                                 )
                     except Exception as exc:  # noqa: BLE001 - source repair is optional
-                        report.source_error = type(exc).__name__
+                        report.source_error = diagnose(exc, "source")
                 report.asset_failures = {
                     p: sum(_remaining_asset_failure(e, resolver) for e in errors)
                     for p, errors in failures.items()
                 }
                 emit("Ergebnisse werden gespeichert", "commit")
+                stage = "save"
                 with data_loading.cache_lock(data_path):
                     current, revision = data_loading.load_data_snapshot(
                         path=data_path, settings=config
@@ -469,9 +577,9 @@ def run_sync(request, *, progress=None, data_path=None):
                     except (
                         Exception
                     ) as exc:  # noqa: BLE001 - cache was already committed
-                        report.raw_error = type(exc).__name__
+                        report.raw_error = diagnose(exc, "raw")
         except Exception as exc:  # noqa: BLE001 - persist failure before releasing lock
-            report.save_error = f"{type(exc).__name__}: {exc}"
+            report.save_error = diagnose(exc, stage)
         status["report"] = report.to_dict()
         status["state"] = (
             "completed"

@@ -3,14 +3,17 @@
 import json
 import os
 import threading
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import streamlit as st
 
 import data_loading
 from desk_sync import SyncRequest, make_sync_request, run_sync, status_path
+from operation_errors import safe_diagnostic
 from service_desks import BY_KEY
 from settings import load_settings
 from ui_auth import require_current_session
@@ -56,6 +59,9 @@ class SyncJobs:
             except (
                 Exception
             ) as exc:  # noqa: BLE001 - expose pre-admission/storage failures
+                diagnostic = safe_diagnostic(
+                    exc, operation_id=uuid4().hex, stage="save"
+                )
                 with self.lock:
                     self.failure = (
                         data_path,
@@ -63,9 +69,10 @@ class SyncJobs:
                         {
                             "state": "failed",
                             "request": request.to_dict(),
-                            "progress": f"Import fehlgeschlagen: {type(exc).__name__}",
+                            "progress": f"Import fehlgeschlagen: {diagnostic.code}",
                             "report": {
-                                "save_error": type(exc).__name__,
+                                "save_error": diagnostic.code,
+                                "diagnostics": [asdict(diagnostic)],
                                 "complete": False,
                             },
                         },
@@ -212,6 +219,11 @@ def render_sync_feedback(location):
             if count:
                 st.warning(
                     f"{project}: Assets-Daten bei {count} Tickets unvollständig. Jira-/Assets-Berechtigungen prüfen."
+                )
+        for project, count in report.get("link_failures", {}).items():
+            if count:
+                st.warning(
+                    f"{project}: Beziehungsdaten bei {count} Referenzen unvollständig."
                 )
         for project, count in report.get("invalid_rows", {}).items():
             if count:
