@@ -394,13 +394,10 @@ def _asset_label(issue, field_name, *, settings=None):
     )
     if normal_marker and object_id:
         reference = fields[field_name][0]
-        if (
-            issue.get("assets_cloud_id", config.tenant.cloud_id)
-            != config.tenant.cloud_id
-            or issue.get("assets_workspace_id", config.tenant.workspace_id)
-            != config.tenant.workspace_id
-        ):
-            return "Unbekannt"
+        identity = (issue.get("assets_cloud_id"), issue.get("assets_workspace_id"))
+        if identity != (config.tenant.cloud_id, config.tenant.workspace_id):
+            if identity != (None, None) or config.tenant != DEFAULT_TENANT:
+                return "Unbekannt"
         if reference.get("workspaceId") != config.tenant.workspace_id:
             return "Unbekannt"
     labels = issue.get("asset_labels") or {}

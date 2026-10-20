@@ -8,15 +8,21 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from settings import DEFAULT_TENANT, TENANT_ATTR, SettingsError, load_settings
+from settings import DEFAULT_TENANT, TENANT_ATTR, Settings, SettingsError, load_settings
 
 DATA_PATH = "data/jira_data.pkl"
 _mutex = threading.RLock()
 _lock_state = threading.local()
 
 
-def _ticket_path(path: str | Path | None = None) -> Path:
-    return Path(path).resolve() if path is not None else load_settings().paths.tickets
+def _ticket_path(
+    path: str | Path | None = None, *, settings: Settings | None = None
+) -> Path:
+    return (
+        Path(path).resolve()
+        if path is not None
+        else (settings or load_settings()).paths.tickets
+    )
 
 
 class CacheChangedError(RuntimeError):
@@ -78,7 +84,8 @@ def cache_revision(path=None):
 
 def load_data_snapshot(path=None, *, settings=None):
     """Read a coherent frame and revision for a later conditional save."""
-    target = _ticket_path(path)
+    settings = settings or load_settings()
+    target = _ticket_path(path, settings=settings)
     with cache_lock(target):
         return load_data(path=target, settings=settings), cache_revision(target)
 
@@ -87,7 +94,8 @@ def save_data_if_unchanged(
     df, revision, *, backup_prefix=None, path=None, settings=None
 ):
     """Commit a snapshot only if no writer has replaced its input meanwhile."""
-    target = _ticket_path(path)
+    settings = settings or load_settings()
+    target = _ticket_path(path, settings=settings)
     with cache_lock(target):
         if cache_revision(target) != revision:
             raise CacheChangedError(
@@ -125,7 +133,8 @@ def drop_obsolete_columns(df):
 
 
 def save_data(df, *, path=None, settings=None):
-    target = _ticket_path(path)
+    settings = settings or load_settings()
+    target = _ticket_path(path, settings=settings)
     with cache_lock(target):
         _save_data_unlocked(df, path=target, settings=settings)
 
@@ -137,7 +146,7 @@ def _save_data_unlocked(df, *, path=None, settings=None):
     if TENANT_ATTR in df.attrs and df.attrs[TENANT_ATTR] != identity:
         raise SettingsError("tenant_mismatch", ("JIRA_CLOUD_ID", "JIRA_WORKSPACE_ID"))
     df.attrs[TENANT_ATTR] = identity
-    path = _ticket_path(path)
+    path = _ticket_path(path, settings=config)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
@@ -151,7 +160,8 @@ def _save_data_unlocked(df, *, path=None, settings=None):
 
 
 def load_data(*, path=None, settings=None):
-    path = _ticket_path(path)
+    config = settings or load_settings()
+    path = _ticket_path(path, settings=config)
     if path.exists():
         with path.open("rb") as f:
             # bandit B301: DATA_PATH is written by save_data() on this machine,
@@ -159,7 +169,6 @@ def load_data(*, path=None, settings=None):
             # a third party can supply, switch to a non-executable format
             # (e.g. parquet) instead of suppressing this.
             frame = drop_obsolete_columns(pickle.load(f))  # nosec B301
-        config = settings or load_settings()
         identity = frame.attrs.get(TENANT_ATTR)
         if identity is None:
             if config.tenant != DEFAULT_TENANT:

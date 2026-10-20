@@ -14,6 +14,7 @@ import os
 import shutil
 import tempfile
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 
 import pandas as pd
@@ -32,8 +33,10 @@ from data_loading import (
     CacheChangedError,
     cache_lock,
     cache_revision,
+    load_data,
     save_data,
 )
+from jira_country_export import resolve_asset_country_strict
 from resolution_bands import classify_bands
 from settings import load_settings
 
@@ -75,7 +78,7 @@ def add_resolution_band(df):
     return out
 
 
-def write_pickle_atomically(df, path):
+def write_pickle_atomically(df, path, *, settings=None):
     """Write df to path so an interrupted run cannot leave a truncated pickle.
 
     The dashboard cache is read by data_loading.load_data() with a plain open(),
@@ -85,8 +88,9 @@ def write_pickle_atomically(df, path):
     than reimplementing either behaviour. A custom --output gets the same
     tempfile-then-replace treatment, minus the cache-specific column pruning.
     """
-    if os.path.abspath(path) == str(load_settings().paths.tickets):
-        save_data(df, path=path)
+    config = settings or load_settings()
+    if os.path.abspath(path) == str(config.paths.tickets):
+        save_data(df, path=path, settings=config)
         return
 
     target = Path(path)
@@ -103,7 +107,8 @@ def write_pickle_atomically(df, path):
 
 
 def main():
-    paths = load_settings().paths
+    config = load_settings()
+    paths = config.paths
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", default=None)
     parser.add_argument("--output", default=None, help="defaults to --input")
@@ -128,7 +133,9 @@ def main():
     # Deserializing our own locally-generated pickle, not untrusted input.
     with cache_lock(output):
         revision = cache_revision(output)
-        df = pd.read_pickle(args.input)  # nosec B301
+        df = load_data(path=args.input, settings=config)
+        if df is None:
+            raise FileNotFoundError(args.input)
     print(f"Loaded {len(df)} tickets from {args.input}")
 
     absent = [c for c in ESCALATION_COLUMNS if c not in df.columns]
@@ -138,7 +145,7 @@ def main():
             "asset is one of these cannot be told apart from tickets with no asset."
         )
 
-    country_baseline = load_cache(args.cache)
+    country_baseline = load_cache(args.cache, settings=config)
     print(f"Cache holds {len(country_baseline)} assets")
 
     df, cache, stats = refresh_countries(
@@ -146,6 +153,7 @@ def main():
         cache_path=args.cache,
         retry_unknown=args.retry_unknown,
         cache=country_baseline,
+        resolver=partial(resolve_asset_country_strict, settings=config),
     )
     if stats["dropped"]:
         print(f"  dropped {stats['dropped']} null entries; they were re-resolved")
@@ -187,7 +195,9 @@ def main():
     with cache_lock(output):
         if cache_revision(output) != revision:
             raise CacheChangedError("Cache changed during country backfill; rerun.")
-        cache = save_cache(cache, args.cache, baseline=country_baseline)
+        cache = save_cache(
+            cache, args.cache, baseline=country_baseline, settings=config
+        )
         df = attach_country(df, cache)
         # Same path test as write_pickle_atomically(), which routes the live cache
         # through save_data(). Comparing raw strings here instead would let
@@ -196,7 +206,7 @@ def main():
             backup = f"{args.input}.bak-{datetime.now(UTC):%Y%m%d-%H%M%S-%f}"
             shutil.copy2(args.input, backup)
             print(f"Backup written to {backup}")
-        write_pickle_atomically(df, output)
+        write_pickle_atomically(df, output, settings=config)
     print(f"Wrote {len(df)} tickets to {output}")
 
 
