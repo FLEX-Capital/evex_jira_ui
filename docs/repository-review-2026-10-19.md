@@ -8,15 +8,13 @@ the dashboard, exports, imports, and analysis notebooks. Several apparent DRY
 problems have become correctness bugs. Fix those behaviors before moving files
 or broadly extracting helpers.
 
-This inventory records **40 findings**. Phase 0 implementation on 20 October
-2026 addresses **I01, I02, and I18 locally**; **37 original findings remain:
-19 P2 and 18 P3**. Deployment acceptance for I02 remains pending. One additional
-minor guard-validation issue (M01) is deferred, as recorded in the
-phase 0 verification (optional local file `docs/superpowers/verification/2026-10-19-repository-cleanup-phase-0.md`).
-Each finding identifies current evidence, impact, a proposed change, and a way
-to validate that change. Architecture recommendations are proposals; application
-code changes are tracked separately by the cleanup roadmap. The evidence below
-describes the original review snapshot unless a closure note says otherwise.
+This historical inventory records **40 findings**. Their current local implementation
+and verification status, plus additional M01, are recorded in the
+[cleanup verification report](repository-cleanup-verification-2026-10-20.md).
+All original findings have local implementation evidence; deployed acceptance for
+I02 and the staging checklist remain open. Four minor review follow-ups are listed
+separately. The evidence and proposed fixes below describe the original review
+snapshot; source line references are historical and may have moved.
 
 ## Scope and evidence
 

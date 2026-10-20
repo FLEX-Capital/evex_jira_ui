@@ -60,7 +60,18 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 source = ["."]
-omit = ["tests/*"]
+# Application gate includes every Docker-derived runtime module. Analysis/deck
+# and verification tools have separate ownership and coverage reports.
+omit = [
+  "tests/*",
+  "tools/*",
+  "analysis/*",
+  "*.ipynb",
+  "analysis_workflow.py",
+  "ticket_classifier.py",
+  "classification_cache.py",
+  "build_board_deck.py",
+]
 
 [tool.coverage.report]
 

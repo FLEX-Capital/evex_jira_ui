@@ -1,6 +1,7 @@
 """Native Ruff preserves notebook diagnostics and checks the actual staged source/config."""
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,8 @@ MARKER = "SYNTHETIC_PRIVATE_OUTPUT"
 
 
 def _git(root: Path, *args: str) -> bytes:
-    return subprocess.check_output(["git", "-C", str(root), *args])
+    env = {key: value for key, value in os.environ.items() if key != "GIT_INDEX_FILE"}
+    return subprocess.check_output(["git", "-C", str(root), *args], env=env)
 
 
 def _notebook(source: str, *, dirty: bool = False) -> str:
@@ -44,8 +46,9 @@ def _notebook(source: str, *, dirty: bool = False) -> str:
 
 
 @pytest.fixture
-def quality_repo(tmp_path: Path) -> Path:
+def quality_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Create a repository with a deliberately small, valid Ruff config and notebook."""
+    monkeypatch.delenv("GIT_INDEX_FILE", raising=False)
     _git(tmp_path, "init", "-q")
     (tmp_path / "pyproject.toml").write_text(
         '[tool.ruff]\nline-length=100\n[tool.ruff.lint]\nselect=["E", "F"]\n'
@@ -168,3 +171,14 @@ def test_type_gate_is_required_without_overlapping_adapter() -> None:
     assert "--types" in quality["run"]
     assert not any(item.startswith("mypy@") for item in config["lint"]["enabled"])
     assert {"trunk-check-pre-commit", "trunk-check-pre-push"} <= set(config["actions"]["enabled"])
+
+
+def test_synthetic_repo_does_not_mutate_inherited_index(quality_repo: Path, monkeypatch) -> None:
+    """Temporary Git helpers cannot accidentally write a caller's alternate index."""
+    caller = quality_repo / "caller.index"
+    caller.write_bytes((quality_repo / ".git/index").read_bytes())
+    before = caller.read_bytes()
+    monkeypatch.setenv("GIT_INDEX_FILE", str(caller))
+    (quality_repo / "synthetic.py").write_text("value = 1\n")
+    _git(quality_repo, "add", "synthetic.py")
+    assert caller.read_bytes() == before

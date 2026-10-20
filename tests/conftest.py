@@ -1,5 +1,7 @@
 """The offline suite must never fall through to a real Jira/Assets request."""
 
+import importlib
+import importlib.util
 import os
 import subprocess
 import sys
@@ -37,11 +39,17 @@ def public_ui(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def forbid_unmocked_network(monkeypatch):
-    def forbidden(*args, **kwargs):
+def forbid_unmocked_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden(*args: object, **kwargs: object) -> None:
         raise AssertionError("Unmocked network request in the offline test suite")
 
     monkeypatch.setattr(requests.sessions.Session, "request", forbidden)
+    for name in ("httpx", "httpx2"):
+        if importlib.util.find_spec(name) is None:
+            continue
+        http = importlib.import_module(name)
+        monkeypatch.setattr(http.HTTPTransport, "handle_request", forbidden)
+        monkeypatch.setattr(http.AsyncHTTPTransport, "handle_async_request", forbidden)
 
 
 @pytest.fixture(autouse=True)

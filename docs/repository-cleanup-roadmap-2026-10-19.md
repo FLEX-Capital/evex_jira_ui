@@ -1,32 +1,19 @@
 # Repository cleanup roadmap
 
-Date: 2026-10-19
-Status: Phases 0–7 implemented and independently reviewed locally on 2026-10-20.
-Phase 7 passes 592 tests and 127 subtests at 93% combined coverage. Of the 33 approved
-remaining-phase tasks, 30 are complete; phase 8 documentation and delivery checks are in progress. Deployment checks
-remain pending; phase 0 notebook/tooling packaging is finalized in phase 8.
+Date: 2026-10-19; implementation checkpoint: 2026-10-20.
+All 33 approved phase 1–8 tasks are implemented locally. Phases 0–7 have independent
+reviews; final phase 8 review is pending. The [verification report](repository-cleanup-verification-2026-10-20.md)
+contains actual checks, every I01–I40/M01 disposition, review decisions and deferred
+minors. Deployed I02 acceptance and the explicit staging checklist remain pending.
 
-This roadmap covers all **40 findings** in the
-[repository review](repository-review-2026-10-19.md). **5 original findings remain**:
-I34, I35, I36, I39 and I40.
-M01, an additional notebook-schema validation issue, is owned by phase 8.
-The objective is to fix incorrect behavior, give shared policy one owner, and
-finish with enforceable development and production checks.
+The [original repository review](repository-review-2026-10-19.md) is historical
+evidence. The [development guide](development.md) contains the durable supported
+architecture/setup contract, and the [task index](repository-cleanup-task-index-2026-10-20.md)
+maps all phases, dependencies and issue owners.
 
-The durable [development and architecture guide](development.md) summarizes the approved boundaries. The detailed local design is in
-the cleanup specification (optional local file `docs/superpowers/specs/2026-10-19-repository-cleanup-design.md`).
-The first deliverable is defined in
-the phase 0 specification (optional local file `docs/superpowers/specs/2026-10-19-repository-cleanup-phase-0-design.md`).
-The detailed phase 0 plan (optional local file `docs/superpowers/plans/2026-10-19-repository-cleanup-phase-0.md`)
-now defines the first three changes, their interfaces, regression checks, and
-commit boundaries. The phase 0 verification (optional local file `docs/superpowers/verification/2026-10-19-repository-cleanup-phase-0.md`)
-records 242 passing tests, review corrections, commit limits and pending checks.
-
-The [remaining-phase task index](repository-cleanup-task-index-2026-10-20.md)
-links all eight detailed plans, their shared execution contract, dependencies,
-interfaces and finding-to-task mapping. These are working-copy planning artifacts;
-their acceptance criteria do not mark any remaining issue fixed. The existing
-`docs/superpowers/` ignore policy is preserved.
+Detailed approved local specifications, plans and phase review working files remain
+optional plain paths under `docs/superpowers/`. They are ignored and have not been
+force-added. A fresh clone can use the tracked guides and final report without them.
 
 ## Recommended delivery approach
 

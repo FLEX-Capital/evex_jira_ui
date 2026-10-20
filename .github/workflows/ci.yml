@@ -17,33 +17,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Install uv
         uses: astral-sh/setup-uv@v4
-
       - name: Set up Python 3.12
         run: uv python install 3.12
-
       - name: Install dependencies
         run: uv sync --frozen --group analysis --group dev
-
       - name: Check dependency lock and runtime export
         run: |
           uv lock --check
           uv run --frozen --no-sync python tools/dependency_export.py --check
-
-      - name: Check clean runtime
-        run: >-
-          uv run --frozen --no-sync pytest
-          tests/test_runtime_install.py
-          --run-runtime-install --no-cov
-
-      - name: Check notebook outputs
-        run: uv run --frozen python tools/notebook_outputs.py --check
-
-      - name: Run tests
-        run: uv run --frozen --no-sync pytest --cov-report=xml
-
+      - name: Offline tests and application coverage
+        run: uv run --frozen --no-sync pytest --cov-fail-under=80 --cov-report=xml
       - name: Coverage comment
         uses: MishaKav/pytest-coverage-comment@v1.10.0
         if: >-
@@ -52,6 +37,18 @@ jobs:
         with:
           pytest-xml-coverage-path: coverage.xml
           github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Separate analysis and historical deck coverage
+        env:
+          COVERAGE_FILE: analysis.coverage
+        run: >-
+          uv run --frozen --no-sync pytest
+          tests/test_classification_cache.py tests/test_classification_validation.py
+          tests/test_classification_workflow.py tests/test_ticket_classifier.py
+          tests/test_analysis_workflow.py tests/test_board_snapshot.py
+          --cov-reset --cov-config=/dev/null
+          --cov=analysis_workflow --cov=ticket_classifier
+          --cov=classification_cache --cov=build_board_deck
+          --cov-report=term --cov-report=xml:analysis-coverage.xml
 
   lint:
     runs-on: ubuntu-latest
@@ -59,21 +56,49 @@ jobs:
       TRUNK_TELEMETRY: "off"
     steps:
       - uses: actions/checkout@v4
-
       - name: Install uv
         uses: astral-sh/setup-uv@v4
-
       - name: Set up Python 3.12
         run: uv python install 3.12
-
       - name: Install locked analysis and development groups
         run: uv sync --frozen --group analysis --group dev
-
       - name: Native Python quality
         run: uv run --frozen --no-sync python tools/check_python.py --all
-
       - name: Complete maintained types
         run: uv run --frozen --no-sync mypy
-
+      - name: Check notebook outputs including archive
+        run: uv run --frozen --no-sync python tools/notebook_outputs.py --check
+      - name: Check tracked documentation links
+        run: uv run --frozen --no-sync python tools/check_docs.py --tracked
       - name: Trunk check
         uses: trunk-io/trunk-action@v1.3.1
+
+  runtime-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+      - name: Install runtime and test driver
+        run: uv sync --frozen --group dev
+      - name: Fresh hashed runtime installation
+        run: >-
+          uv run --frozen --no-sync pytest tests/test_runtime_install.py
+          --run-runtime-install --no-cov
+
+  runtime-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+      - name: Install runtime and test driver
+        run: uv sync --frozen --group dev
+      - name: Built runtime image content, health and authentication
+        run: >-
+          uv run --frozen --no-sync pytest tests/test_runtime_image.py
+          tests/test_container_contract.py --run-runtime-image --no-cov
