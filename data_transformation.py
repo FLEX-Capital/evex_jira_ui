@@ -9,9 +9,10 @@ import pandas as pd
 from dotenv import load_dotenv
 from jira import JIRA
 
+import reporting_policy as reporting
 from asset_country import attach_country, load_cache
 from jira_loader import WORKSPACE_ID
-from resolution_bands import HOURS_PER_WORKING_DAY, classify_bands
+from resolution_bands import classify_bands
 
 load_dotenv(override=True)
 
@@ -42,183 +43,163 @@ TZ = "Europe/Berlin"
 def enrich_jira_time_metrics(
     df: pd.DataFrame,
     tz: str = "Europe/Berlin",
-    done_value: str = "Fertig",
+    done_value: str = reporting.LEGACY_DONE,
     status_col: str = "currentstatus_name",
     created_col: str = "created",
     updated_col: str = "updated",
     status_date_col: str = "currentstatus_date",
-    business_start: time = time(8, 0),
-    business_end: time = time(18, 0),
-    subdiv: (
-        str | None
-    ) = None,  # e.g. "BE", "BY", "NW", ...; None = federal holidays only
-    hours_per_working_day: float = HOURS_PER_WORKING_DAY,
+    business_start: time = reporting.BUSINESS_START,
+    business_end: time = reporting.BUSINESS_END,
+    subdiv: str | None = reporting.HOLIDAY_SUBDIV,
+    hours_per_working_day: float | None = None,
     bins: list[float] | None = None,
 ) -> pd.DataFrame:
-    """
-    Returns a copy of df with standardized timestamp columns and resolution KPIs.
-    Requires: pip install holidays
-    Expects: status_col contains "Fertig" for done tickets.
+    """Normalize completion and calculate metrics only for valid time intervals.
+
+    Args:
+        df: Ticket records; input is never modified.
+        tz: Reporting timezone.
+        done_value: Legacy completed-status label when category identity is absent.
+        status_col: Legacy status label column.
+        created_col: Creation timestamp column.
+        updated_col: Update timestamp column.
+        status_date_col: Resolution/status-change timestamp column.
+        business_start: Local start of each weekday work window.
+        business_end: Local end of each weekday work window.
+        subdiv: German holiday subdivision, or federal holidays when None.
+        hours_per_working_day: Optional explicit band threshold.
+        bins: Optional elapsed-hour interval edges.
+
+    Returns:
+        A copy with normalized states, quality markers and nullable metrics.
     """
     out = df.copy()
-
-    # ---------- defaults ----------
-    if bins is None:
-        bins = [0, 1, 2, 4, 8, 24, 48, 72, 7 * 24, 14 * 24, 21 * 24]
-
-    # ---------- parse timestamps ----------
-    for c in [created_col, updated_col, status_date_col]:
-        if c in out.columns:
-            out[c] = pd.to_datetime(out[c], errors="coerce", utc=True).dt.tz_convert(tz)
-
-    # ---------- done + resolved_at ----------
-    if status_col not in out.columns:
-        raise KeyError(f"Missing status column '{status_col}'")
-    if created_col not in out.columns:
-        raise KeyError(f"Missing created column '{created_col}'")
-    if status_date_col not in out.columns:
-        raise KeyError(f"Missing status date column '{status_date_col}'")
-
-    out["is_done"] = out[status_col].astype("string") == done_value
-    out["resolved_at"] = out[status_date_col].where(out["is_done"], pd.NaT)
-
-    # ---------- simple elapsed hours ----------
+    bins = list(reporting.ELAPSED_EDGES) if bins is None else bins
+    window_hours = (
+        pd.Timestamp.combine(pd.Timestamp.min.date(), business_end)
+        - pd.Timestamp.combine(pd.Timestamp.min.date(), business_start)
+    ).total_seconds() / 3600
+    if window_hours <= 0:
+        raise ValueError("Business end must be after business start")
+    band_hours = (
+        window_hours if hours_per_working_day is None else hours_per_working_day
+    )
+    for column in (created_col, updated_col, status_date_col):
+        values = out.get(column, pd.Series(index=out.index, dtype="object"))
+        out[column] = pd.to_datetime(
+            values, errors="coerce", utc=True, format="mixed"
+        ).dt.tz_convert(tz)
+    keys = out.get("status_category_key", pd.Series(index=out.index, dtype="object"))
+    statuses = out.get(status_col, pd.Series(index=out.index, dtype="object"))
+    out["status_category_key"] = keys
+    out["completion_state"] = pd.Series(
+        [
+            reporting.completion_state(key, status, done_value=done_value)
+            for key, status in zip(keys, statuses, strict=True)
+        ],
+        index=out.index,
+        dtype="string",
+    )
+    out["is_done"] = (
+        out["completion_state"].map({"done": True, "open": False}).astype("boolean")
+    )
+    done = out["completion_state"].eq("done")
+    out["resolved_at"] = out[status_date_col].where(done, pd.NaT)
+    endpoints = out[created_col].notna() & out["resolved_at"].notna()
+    reversed_time = endpoints & (out["resolved_at"] < out[created_col])
+    valid = done & endpoints & ~reversed_time
+    out["duration_quality"] = pd.Series("missing", index=out.index, dtype="string")
+    out.loc[reversed_time, "duration_quality"] = "reversed"
+    out.loc[valid, "duration_quality"] = "valid"
     out["time_to_resolution_h"] = (
-        out["resolved_at"] - out[created_col]
-    ).dt.total_seconds() / 3600.0
-
-    # ---------- calendar days (0 if same calendar day; only for done) ----------
+        (out["resolved_at"] - out[created_col]).dt.total_seconds() / 3600
+    ).where(valid)
     out["time_to_resolution_calendar_days"] = (
-        out["resolved_at"].dt.tz_localize(None).dt.normalize()
-        - out[created_col].dt.tz_localize(None).dt.normalize()
-    ).dt.days
-    out.loc[~out["is_done"], "time_to_resolution_calendar_days"] = np.nan
-
-    out["resolution"] = np.where(
-        out["is_done"],
-        np.where(out["time_to_resolution_calendar_days"] < 1, "Same day", "> 1 day"),
-        "Not done",
+        (
+            out["resolved_at"].dt.tz_localize(None).dt.normalize()
+            - out[created_col].dt.tz_localize(None).dt.normalize()
+        )
+        .dt.days.where(valid)
+        .astype("float64")
+    )
+    out["resolution"] = "Not done"
+    out.loc[out["completion_state"].eq("unknown"), "resolution"] = (
+        "Unbekannter Abschlussstatus"
+    )
+    out.loc[done & ~valid, "resolution"] = "Unbekannte Dauer"
+    out.loc[valid, "resolution"] = np.where(
+        out.loc[valid, "time_to_resolution_calendar_days"] < 1, "Same day", "> 1 day"
+    )
+    dates = pd.concat([out[created_col], out[updated_col], out["resolved_at"]])
+    years = dates.dt.year.dropna()
+    min_year = int(years.min()) if not years.empty else pd.Timestamp.now(tz=tz).year
+    max_year = int(years.max()) if not years.empty else min_year
+    calendar = holidays.Germany(years=range(min_year, max_year + 1), subdiv=subdiv)
+    holiday_dates = np.array(
+        [np.datetime64(day) for day in calendar], dtype="datetime64[D]"
     )
 
-    # ---------- holidays (Germany) ----------
-    # Determine year range from created/resolved/updated (whatever is present)
-    year_series = []
-    for c in [created_col, updated_col, "resolved_at"]:
-        if c in out.columns:
-            year_series.append(out[c])
-    years_stack = pd.concat(year_series, axis=0)
-
-    # With no rows (or no parseable dates) .min()/.max() are NaN, and int(NaN)
-    # raises "cannot convert float NaN to integer". Fall back to the current year.
-    years = years_stack.dt.year.dropna()
-    if years.empty:
-        min_year = max_year = pd.Timestamp.today().year
-    else:
-        min_year = int(years.min())
-        max_year = int(years.max())
-    de = holidays.Germany(years=range(min_year, max_year + 1), subdiv=subdiv)
-
-    holiday_set = set(de.keys())  # datetime.date for biz-hour logic
-    holiday_dates = np.array(
-        [np.datetime64(d) for d in de], dtype="datetime64[D]"
-    )  # for np.busday_count
-
-    # ---------- business hours helper ----------
-    def business_seconds_between(start: pd.Timestamp, end: pd.Timestamp) -> float:
-        if pd.isna(start) or pd.isna(end) or end <= start:
-            return 0.0
-
+    def business_hours(start: pd.Timestamp, end: pd.Timestamp) -> float:
         total = 0.0
-        # iterate days in tz (timestamps already tz-aware)
-        for day in pd.date_range(
-            start.normalize(), end.normalize(), freq="D", tz=start.tz
-        ):
-            d = day.date()
-            if day.weekday() >= 5 or d in holiday_set:
+        for day in pd.date_range(start.normalize(), end.normalize(), freq="D"):
+            if day.weekday() >= 5 or day.date() in calendar:
                 continue
-
-            day_start = pd.Timestamp.combine(d, business_start).tz_localize(start.tz)
-            day_end = pd.Timestamp.combine(d, business_end).tz_localize(start.tz)
-
-            a = max(start, day_start)
-            b = min(end, day_end)
-            if b > a:
-                total += (b - a).total_seconds()
+            lower = pd.Timestamp.combine(day.date(), business_start).tz_localize(tz)
+            upper = pd.Timestamp.combine(day.date(), business_end).tz_localize(tz)
+            overlap = min(end, upper) - max(start, lower)
+            total += max(0, overlap.total_seconds()) / 3600
         return total
 
-    # ---------- business hours/days to resolution ----------
-    out["time_to_resolution_biz_hours"] = np.where(
-        out["is_done"],
-        out.apply(
-            lambda r: (
-                business_seconds_between(r[created_col], r["resolved_at"]) / 3600.0
-            ),
-            axis=1,
-        ),
-        np.nan,
+    out["time_to_resolution_biz_hours"] = pd.Series(
+        [
+            business_hours(start, end) if good else np.nan
+            for start, end, good in zip(
+                out[created_col], out["resolved_at"], valid, strict=True
+            )
+        ],
+        index=out.index,
+        dtype="float64",
     )
-    out["time_to_resolution_biz_days"] = out["time_to_resolution_biz_hours"] / (
-        (
-            pd.Timestamp.combine(pd.Timestamp.today().date(), business_end)
-            - pd.Timestamp.combine(pd.Timestamp.today().date(), business_start)
-        ).total_seconds()
-        / 3600.0
+    out["time_to_resolution_biz_days"] = (
+        out["time_to_resolution_biz_hours"] / window_hours
     )
-
-    # ---------- resolution band (Länder tab) ----------
     out["resolution_band"] = classify_bands(
         out["time_to_resolution_biz_hours"],
         out["is_done"],
-        hours_per_working_day=hours_per_working_day,
+        hours_per_working_day=band_hours,
     )
-
-    # ---------- bins on elapsed hours (real time) ----------
     labels = [f"{int(bins[i])}–{int(bins[i + 1])}" for i in range(len(bins) - 1)]
     out["time_to_resolution_bin"] = pd.cut(
         out["time_to_resolution_h"], bins=bins, labels=labels, include_lowest=True
     )
-
-    # ---------- business day counts including holidays ----------
-    # busday_count wants "datetime64[D]" without tz; normalize via tz_localize(None)
     created_days = out[created_col].dt.tz_localize(None).to_numpy(dtype="datetime64[D]")
-
-    if updated_col in out.columns:
-        updated_days = (
-            out[updated_col].dt.tz_localize(None).to_numpy(dtype="datetime64[D]")
+    for target, metric in [
+        (updated_col, "business_days_created_to_updated"),
+        ("resolved_at", "business_days_created_to_resolved"),
+    ]:
+        mask = (
+            out[created_col].notna()
+            & out[target].notna()
+            & (out[target] >= out[created_col])
         )
-        out["business_days_created_to_updated"] = np.busday_count(
-            created_days, updated_days, weekmask="1111100", holidays=holiday_dates
+        out[metric] = np.nan
+        target_days = out[target].dt.tz_localize(None).to_numpy(dtype="datetime64[D]")
+        out.loc[mask, metric] = np.busday_count(
+            created_days[mask.to_numpy()],
+            target_days[mask.to_numpy()],
+            weekmask="1111100",
+            holidays=holiday_dates,
         )
-    else:
-        out["business_days_created_to_updated"] = np.nan
-
-    resolved_days = (
-        out["resolved_at"].dt.tz_localize(None).to_numpy(dtype="datetime64[D]")
-    )
-    # For unresolved rows, busday_count will error if NaT -> convert to NaN afterwards
-    # Workaround: compute only for done rows
-    out["business_days_created_to_resolved"] = np.nan
-    mask = out["is_done"] & out["resolved_at"].notna()
-    out.loc[mask, "business_days_created_to_resolved"] = np.busday_count(
-        created_days[mask.to_numpy()],
-        resolved_days[mask.to_numpy()],
-        weekmask="1111100",
-        holidays=holiday_dates,
-    )
-
-    # ---------- helper strings ----------
+        if target == updated_col and mask.all():
+            out[metric] = out[metric].astype("int64")
     out["created_string"] = out[created_col].dt.strftime("%Y-%m-%d")
-    if updated_col in out.columns:
-        out["updated_string"] = out[updated_col].dt.strftime("%Y-%m-%d")
-    else:
-        out["updated_string"] = np.nan
-
+    out["updated_string"] = out[updated_col].dt.strftime("%Y-%m-%d")
     out["year"] = out[created_col].dt.year
     out["month"] = out[created_col].dt.month
-    out["week_number"] = out[created_col].dt.isocalendar().week.astype(int)
+    weeks = out[created_col].dt.isocalendar().week
+    out["week_number"] = weeks.astype("int64" if weeks.notna().all() else "Int64")
     out["week_string"] = out[created_col].dt.strftime("%G-W%V")
     out["month_string"] = out[created_col].dt.strftime("%Y-%m")
-
     return out
 
 
@@ -303,6 +284,7 @@ _ISSUE_COLUMNS = [
     "description",
     "status",
     "status_category",
+    "status_category_key",
     "created",
     "updated",
     "labels",
@@ -425,6 +407,7 @@ def _extract_issue(issue, comment_separator):
         "description": fields.get("description") or "",
         "status": _nested(fields, "status", "name"),
         "status_category": _nested(fields, "status", "statusCategory", "name"),
+        "status_category_key": _nested(fields, "status", "statusCategory", "key"),
         "created": fields.get("created") or "",
         "updated": fields.get("updated") or "",
         "labels": fields.get("labels") or [],

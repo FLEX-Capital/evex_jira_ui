@@ -8,7 +8,7 @@ import pytest
 import asset_country
 import backfill_country
 from backfill_country import BAND_COLUMN, add_resolution_band
-from resolution_bands import BAND_NOT_DONE, BAND_UNDER_1H
+from resolution_bands import BAND_UNDER_1H
 
 
 @pytest.fixture
@@ -103,7 +103,7 @@ def test_add_resolution_band_coerces_empty_strings_without_raising():
     # app.py's upsert fills columns missing on either side with "" (app.py:147-152),
     # so real data can hold a float/"" mix in an otherwise-numeric hours column.
     # A naive `<=` comparison against "" raises TypeError - add_resolution_band
-    # must coerce before classifying, landing those rows in BAND_NOT_DONE.
+    # must coerce before classifying, marking completed unknown duration explicitly.
     df = pd.DataFrame(
         {
             "time_to_resolution_biz_hours": [0.5, "", 20.0],
@@ -114,7 +114,7 @@ def test_add_resolution_band_coerces_empty_strings_without_raising():
     out = add_resolution_band(df)
 
     assert list(out[BAND_COLUMN][:1]) == [BAND_UNDER_1H]
-    assert out[BAND_COLUMN][1] == BAND_NOT_DONE
+    assert out[BAND_COLUMN][1] == "Unbekannte Dauer"
 
 
 def test_add_resolution_band_warns_and_skips_when_column_missing(capsys):

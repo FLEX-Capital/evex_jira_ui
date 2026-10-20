@@ -34,12 +34,12 @@ def test_open_ticket_ignores_hours():
     assert classify_band(0.25, is_done=False) == BAND_NOT_DONE
 
 
-def test_done_ticket_without_hours_is_not_done():
-    assert classify_band(float("nan"), is_done=True) == BAND_NOT_DONE
+def test_done_ticket_without_hours_is_unknown():
+    assert classify_band(float("nan"), is_done=True) == "Unbekannte Dauer"
 
 
-def test_none_hours_is_not_done():
-    assert classify_band(None, is_done=True) == BAND_NOT_DONE
+def test_none_hours_is_unknown():
+    assert classify_band(None, is_done=True) == "Unbekannte Dauer"
 
 
 def test_custom_working_day_length():
