@@ -32,6 +32,15 @@ the next explicit classification invocation. Rotating a credential alone does
 not invalidate results. An explicit positional `model` and supplied configuration
 must agree on the deployment.
 
+Reusable Azure SDK clients contribute their effective endpoint, fixed deployment
+route (if any), and API query version before cache selection. An explicit
+configuration must agree with that route. Non-SDK fake clients retain the explicit
+testing seam. Configurations captured under another prompt, taxonomy, schema,
+renderer, or policy implementation are rejected; capture a fresh configuration
+after code changes. Changing digest labels alone cannot request an older
+implementation. Frozen nested generation values are copied to ordinary JSON
+containers only at the request boundary.
+
 `classify_tickets` returns at most one matching result or safe input-error row per
 requested key. Historical configurations/texts and unrelated keys remain stored
 and are excluded from that return value. Later duplicate-key inputs take

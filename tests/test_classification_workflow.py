@@ -47,11 +47,6 @@ def _fake(
         {"endpoint": "https://other.test"},
         {"deployment": "other"},
         {"api_version": "other"},
-        {"prompt_digest": "other"},
-        {"taxonomy_digest": "other"},
-        {"schema_version": 3},
-        {"renderer_version": "2"},
-        {"policy_version": "2"},
         {"generation": {"max_completion_tokens": 5000, "max_chars": 6000}},
     ],
 )
@@ -95,6 +90,72 @@ def test_same_identity_reuses_but_each_config_change_is_pending(
             force=True,
         )
         assert call.call_count == 2
+        call.reset_mock()
+        classifier.classify_tickets(
+            frame, path, client=object(), progress=False, configuration=config
+        )
+        assert not call.called
+    assert len(load_classifications(path)) == 3
+
+
+@pytest.mark.parametrize(
+    "constant",
+    [
+        "SYSTEM_PROMPT",
+        "TicketClassification",
+        "RESULT_SCHEMA_VERSION",
+        "TEXT_RENDERER_VERSION",
+        "CLASSIFICATION_POLICY_VERSION",
+    ],
+)
+def test_changed_implementation_selects_new_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    constant: str,
+) -> None:
+    """Actual implementation changes invalidate only the matching requested identity."""
+    path, frame, config = (
+        tmp_path / "cache.parquet",
+        make_frame(["SDAX-1", "SDAX-2"]),
+        _config(),
+    )
+    with patch.object(classifier, "classify_one", side_effect=_fake) as call:
+        classifier.classify_tickets(
+            frame, path, client=object(), progress=False, configuration=config
+        )
+        with monkeypatch.context() as change:
+            original = getattr(classifier, constant)
+            if constant == "TicketClassification":
+                schema = original.model_json_schema()
+                change.setattr(
+                    original,
+                    "model_json_schema",
+                    lambda: {**schema, "title": "Changed"},
+                )
+            else:
+                change.setattr(
+                    classifier,
+                    constant,
+                    (
+                        original + 1
+                        if isinstance(original, int)
+                        else original + " changed"
+                    ),
+                )
+            changed = _config()
+            call.reset_mock()
+            result = classifier.classify_tickets(
+                frame.iloc[:1],
+                path,
+                client=object(),
+                progress=False,
+                configuration=changed,
+            )
+            assert call.call_count == 1 and result.key.tolist() == ["SDAX-1"]
+            assert (
+                result.iloc[0].config_digest
+                != classification_identity("SDAX-1", "unused", config).config_digest
+            )
         call.reset_mock()
         classifier.classify_tickets(
             frame, path, client=object(), progress=False, configuration=config

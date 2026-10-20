@@ -25,6 +25,7 @@ an explicit retry. No automatic paid reclassification or remote discovery occurs
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping, Sized
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
@@ -44,6 +45,7 @@ from classification_cache import (
     ClassificationIdentity,
     ClassifierConfig,
     classification_identity,
+    generation_arguments,
     load_classifications,
     merge_classifications,
     select_classifications,
@@ -244,17 +246,23 @@ def scalar_text(value: object) -> str:
     Raises:
         TicketInputError: A nonempty unsupported container is not ticket text.
     """
-    if isinstance(value, str):
-        return value.strip()
-    if isinstance(value, Sized) and len(value) == 0:
-        return ""
-    if not pd.api.types.is_scalar(value) or isinstance(
-        value, (bytes, bytearray, memoryview)
-    ):
-        raise TicketInputError("invalid_text")
-    if value is None or bool(pd.isna(value)):
-        return ""
-    return str(value).strip()
+    try:
+        if isinstance(value, str):
+            text = value.strip()
+        elif isinstance(value, Sized) and len(value) == 0:
+            return ""
+        elif not pd.api.types.is_scalar(value) or isinstance(
+            value, (bytes, bytearray, memoryview)
+        ):
+            raise TicketInputError("invalid_text")
+        elif value is None or bool(pd.isna(value)):
+            return ""
+        else:
+            text = str(value).strip()
+        text.encode("utf-8")
+        return text
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise TicketInputError("invalid_text") from exc
 
 
 def _ticket_fields(row: Mapping[str, Any]) -> dict[str, str]:
@@ -308,6 +316,16 @@ def build_ticket_text(row: Mapping[str, Any], max_chars: int = MAX_TICKET_CHARS)
     return _render_ticket_text(_ticket_fields(row), max_chars)
 
 
+def _ticket_key(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    try:
+        value.encode("utf-8")
+    except UnicodeError:
+        return ""
+    return value.strip()
+
+
 def validate_ticket_input(
     row: Mapping[str, Any], *, max_chars: int = MAX_TICKET_CHARS
 ) -> tuple[str, str]:
@@ -323,13 +341,13 @@ def validate_ticket_input(
     Raises:
         TicketInputError: Invalid key, unsupported cell, or entirely empty ticket text.
     """
-    key = row.get("key")
-    if not isinstance(key, str) or not key.strip():
+    key = _ticket_key(row.get("key"))
+    if not key:
         raise TicketInputError("invalid_key")
     fields = _ticket_fields(row)
     if not any(fields[name] for name in ("summary", "description", "comments")):
         raise TicketInputError("empty_text")
-    return key.strip(), _render_ticket_text(fields, max_chars)
+    return key, _render_ticket_text(fields, max_chars)
 
 
 def load_cache(cache_path: str | Path | None = None) -> pd.DataFrame:
@@ -418,7 +436,7 @@ def classify_one(
     try:
         model = model or resolve_deployment()
         request_generation = (
-            dict(generation)
+            generation_arguments(generation)
             if generation is not None
             else {"max_completion_tokens": MAX_COMPLETION_TOKENS}
         )
@@ -522,6 +540,50 @@ def _selected_results(
     return selected
 
 
+def _effective_configuration(
+    config: ClassifierConfig,
+    implementation: ClassifierConfig,
+    client: Any,
+    *,
+    explicit: bool,
+    model: str | None,
+) -> ClassifierConfig:
+    for name in (
+        "prompt_digest",
+        "taxonomy_digest",
+        "schema_version",
+        "renderer_version",
+        "policy_version",
+    ):
+        if getattr(config, name) != getattr(implementation, name):
+            raise ValueError("stale_implementation_configuration")
+    # Deliberate injected fake clients retain the explicit configuration seam.
+    # Real SDK clients expose effective routing via public base_url/default_query.
+    if isinstance(client, openai.AzureOpenAI):
+        route = re.fullmatch(
+            r"(.*)/openai(?:/deployments/([^/]+))?/?", client.base_url.path
+        )
+        api_version = client.default_query.get("api-version")
+        if route is None or not isinstance(api_version, str) or not api_version:
+            raise ValueError("invalid_client_configuration")
+        endpoint = str(
+            client.base_url.copy_with(path=route[1], query=None, fragment=None)
+        ).rstrip("/")
+        deployment = route[2] or config.deployment
+        if explicit and (endpoint, deployment, api_version) != (
+            config.endpoint,
+            config.deployment,
+            config.api_version,
+        ):
+            raise ValueError("conflicting_client_configuration")
+        if model is not None and model != deployment:
+            raise ValueError("conflicting_client_configuration")
+        config = replace(
+            config, endpoint=endpoint, deployment=deployment, api_version=api_version
+        )
+    return config
+
+
 def classify_tickets(
     df: pd.DataFrame,
     cache_path: str | Path | None = None,
@@ -555,7 +617,14 @@ def classify_tickets(
         Historical/unrelated identities remain stored and are not returned for joins.
     """
     operation_settings = load_settings()
-    config = configuration or classifier_configuration(operation_settings, model=model)
+    implementation = classifier_configuration(operation_settings, model=model)
+    config = _effective_configuration(
+        configuration or implementation,
+        implementation,
+        client,
+        explicit=configuration is not None,
+        model=model,
+    )
     if model is not None and model != config.deployment:
         raise ValueError("conflicting_model_configuration")
     for name, value in (("max_workers", max_workers), ("save_every", save_every)):
@@ -585,24 +654,24 @@ def classify_tickets(
     invalid: dict[str, str] = {}
     requested: dict[str, None] = {}
     row_errors: list[dict[str, Any]] = []
+    identities: dict[str, ClassificationIdentity] = {}
     for position, (_, row) in enumerate(df.iterrows()):
-        raw_key = row.get("key")
-        key = raw_key.strip() if isinstance(raw_key, str) else ""
+        key = _ticket_key(row.get("key"))
         if key:
             requested[key] = None
         try:
             key, text = validate_ticket_input(row.to_dict(), max_chars=max_chars)
+            identity = classification_identity(key, text, config)
         except TicketInputError as exc:
             row_errors.append({"index": position, "code": exc.code})
             if key:
                 invalid[key] = exc.code
                 texts.pop(key, None)
+                identities.pop(key, None)
             continue
         texts[key] = text
+        identities[key] = identity
         invalid.pop(key, None)
-    identities = {
-        key: classification_identity(key, text, config) for key, text in texts.items()
-    }
     selected = _selected_results(cache, identities)
     done = set(selected.loc[selected["error"].isna(), "key"])
     pending = [(key, text) for key, text in texts.items() if force or key not in done]

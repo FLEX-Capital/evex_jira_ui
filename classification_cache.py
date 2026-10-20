@@ -125,6 +125,18 @@ class ClassifierConfig:
         object.__setattr__(self, "generation", _freeze(_json_value(self.generation)))
 
 
+def generation_arguments(generation: Mapping[str, object]) -> dict[str, Any]:
+    """Materialize frozen settings as a fresh JSON-compatible SDK request copy.
+
+    Args:
+        generation: Valid canonical generation values, including nested frozen containers.
+
+    Returns:
+        Ordinary nested dictionaries/lists, independently mutable by the SDK.
+    """
+    return _json_value(generation)
+
+
 @dataclass(frozen=True)
 class ClassificationIdentity:
     """A ticket's rendered-text and complete configuration SHA-256 identity."""
@@ -275,10 +287,13 @@ def _deduplicate(frame: pd.DataFrame) -> pd.DataFrame:
         else:
             legacy_counts[digest] += 1
             identity, order = (
-                "legacy_unverified",
+                (
+                    "legacy_unverified",
+                    digest,
+                    str(legacy_counts[digest]),
+                ),
                 digest,
-                str(legacy_counts[digest]),
-            ), digest
+            )
         if identity not in selected or order > selected[identity][0]:
             selected[identity] = order, record
     return _normalize(
