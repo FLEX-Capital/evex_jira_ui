@@ -17,6 +17,9 @@ WORKING_DAY_HOURS = (
     - datetime.combine(datetime.min.date(), BUSINESS_START)
 ).total_seconds() / 3600
 ELAPSED_EDGES = (0, 1, 2, 4, 8, 24, 48, 72, 168, 336, 504)
+ELAPSED_ORDER = tuple(
+    f"{lower}–{upper}" for lower, upper in zip(ELAPSED_EDGES, ELAPSED_EDGES[1:])
+) + ("> 504", "Unbekannte Dauer")
 CLONE_TYPE_NAMES = ("Cloners",)
 
 

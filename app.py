@@ -18,6 +18,7 @@ from data_loading import (
 )
 from data_loading import cache_revision as current_cache_revision
 from data_loading import load_data_snapshot, save_data_if_unchanged
+from data_transformation import enrich_jira_time_metrics
 from interactive import render_interactive
 from plotting import (
     apply_font,
@@ -25,7 +26,7 @@ from plotting import (
     create_toggle_chart,
     generate_distinct_colors,
 )
-from resolution_bands import BAND_COLORS, BAND_NOT_DONE, BAND_ORDER, BAND_UNDER_1H
+from resolution_bands import BAND_COLORS, BAND_ORDER, BAND_UNDER_1H
 from service_desks import (
     BERLIN,
     COMPANY_LABELS,
@@ -145,6 +146,23 @@ if df.empty:
     ):
         render_history_pull()
     st.stop()
+if "completion_state" not in df:
+    df = enrich_jira_time_metrics(df)
+for group_column in ("Hauptkategorie", "status_category", "status", "zentrale"):
+    if group_column in df:
+        df[group_column] = (
+            df[group_column]
+            .astype("string")
+            .fillna("")
+            .str.strip()
+            .replace("", "Unbekannt")
+        )
+completion_counts = df["completion_state"].value_counts()
+st.caption(
+    f"Abgeschlossen: {completion_counts.get('done', 0)}; "
+    f"Offen: {completion_counts.get('open', 0)}; "
+    f"Unbekannter Abschlussstatus: {completion_counts.get('unknown', 0)}"
+)
 df_raw = df.copy()
 
 plot_height = 900
@@ -526,7 +544,7 @@ with tab_countries:
             value=True,
             key="land_include_open",
         )
-        df_land = df if include_open else df[df["resolution_band"] != BAND_NOT_DONE]
+        df_land = df if include_open else df[df["completion_state"] == "done"]
 
         # groupby() drops NaN keys, so a ticket whose Land was never resolved
         # would disappear from the chart AND from every total without a trace -
@@ -571,7 +589,7 @@ with tab_countries:
 with tab_status:
     st.header("📊 Offene Tickets nach Status")
     result = (
-        df[df["status_category"] != "Fertig"][["status_category", "status", "key"]]
+        df[df["completion_state"] == "open"][["status_category", "status", "key"]]
         .groupby(["status_category", "status"])
         .count()
         .reset_index()
@@ -628,7 +646,7 @@ with tab_resolution_time:
 with tab_customer_tickets:
     st.header("📚 Anzahl Tickets pro Kunde")
     result = (
-        df[df["status_category"] == "Fertig"][["zentrale", "key"]]
+        df[df["completion_state"] == "done"][["zentrale", "key"]]
         .groupby(["zentrale"])
         .count()
         .reset_index()

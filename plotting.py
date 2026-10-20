@@ -6,6 +6,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+import reporting_policy as reporting
+
 MODE_ABS = "Absolute Zahlen"
 MODE_LOG = "Absolut (log)"
 MODE_REL = "Relativ (%)"
@@ -21,19 +23,25 @@ def generate_distinct_colors(n):
     return colors
 
 
-def create_resolution_time_charts(df):
-    """Build comparable duration charts from the same completed-ticket cohort."""
-    completed = df.loc[df["currentstatus_name"] == "Fertig"].copy()
+def create_resolution_time_charts(df: pd.DataFrame) -> list[go.Figure]:
+    """Build duration charts accounting for every canonical completed ticket."""
+    if "completion_state" not in df:
+        from data_transformation import enrich_jira_time_metrics
+
+        df = enrich_jira_time_metrics(df)
+    states = df["completion_state"].astype("string").fillna("unknown")
+    counts = {
+        "completed": int((states == "done").sum()),
+        "open_excluded": int((states == "open").sum()),
+        "unknown_completion_excluded": int((~states.isin(["done", "open"])).sum()),
+    }
+    completed = df.loc[states == "done"].copy()
     bin_col = "time_to_resolution_bin"
-    bins = completed[bin_col]
-    if isinstance(bins.dtype, pd.CategoricalDtype):
-        bin_order = bins.cat.categories.tolist()
-    else:
-        # Cached data may store the duration labels as strings instead.
-        bin_order = sorted(
-            bins.dropna().unique(),
-            key=lambda label: float(str(label).split("–")[0]),
-        )
+    bins = completed.get(bin_col, pd.Series(index=completed.index, dtype="string"))
+    bins = bins.astype("string").fillna("Unbekannte Dauer")
+    bins = bins.where(bins.isin(reporting.ELAPSED_ORDER), "Unbekannte Dauer")
+    bin_order = list(reporting.ELAPSED_ORDER)
+    completed[bin_col] = pd.Categorical(bins, categories=bin_order, ordered=True)
 
     totals = completed.groupby(bin_col, observed=False)["key"].count()
     y_max = max(1, totals.max() if not totals.empty else 0) * 1.15
@@ -82,6 +90,19 @@ def create_resolution_time_charts(df):
             range=[-0.5, max(len(bin_order) - 0.5, 0.5)],
         )
         fig.update_yaxes(range=[0, y_max])
+        fig.update_layout(meta=counts)
+        fig.add_annotation(
+            text=(
+                f"Abgeschlossen: {counts['completed']}; "
+                f"offen ausgeschlossen: {counts['open_excluded']}; "
+                f"Abschluss unbekannt ausgeschlossen: {counts['unknown_completion_excluded']}"
+            ),
+            x=0,
+            y=1.15,
+            xref="paper",
+            yref="paper",
+            showarrow=False,
+        )
         figures.append(fig)
     return figures
 
@@ -111,6 +132,11 @@ def create_toggle_chart(
 
     # 1. Data Preparation
     # Group and count
+    df = df.copy()
+    for column in dict.fromkeys([x_col, group_col]):
+        df[column] = (
+            df[column].astype("string").fillna("").str.strip().replace("", "Unbekannt")
+        )
     result = (
         df[[x_col, group_col, count_col]]
         .groupby([x_col, group_col])

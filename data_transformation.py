@@ -171,8 +171,30 @@ def enrich_jira_time_metrics(
         hours_per_working_day=band_hours,
     )
     labels = [f"{int(bins[i])}–{int(bins[i + 1])}" for i in range(len(bins) - 1)]
-    out["time_to_resolution_bin"] = pd.cut(
+    overflow_label = f"> {int(bins[-1])}"
+    duration_labels = pd.cut(
         out["time_to_resolution_h"], bins=bins, labels=labels, include_lowest=True
+    ).astype("string")
+    duration_labels = duration_labels.mask(
+        out["time_to_resolution_h"] > bins[-1], overflow_label
+    )
+    duration_labels = duration_labels.fillna("Unbekannte Dauer")
+    duration_labels = duration_labels.mask(
+        out["completion_state"] == "open", "Nicht abgeschlossen"
+    )
+    duration_labels = duration_labels.mask(
+        out["completion_state"] == "unknown", "Unbekannter Abschlussstatus"
+    )
+    out["time_to_resolution_bin"] = pd.Categorical(
+        duration_labels,
+        categories=[
+            *labels,
+            overflow_label,
+            "Unbekannte Dauer",
+            "Nicht abgeschlossen",
+            "Unbekannter Abschlussstatus",
+        ],
+        ordered=True,
     )
     created_days = out[created_col].dt.tz_localize(None).to_numpy(dtype="datetime64[D]")
     for target, metric in [
