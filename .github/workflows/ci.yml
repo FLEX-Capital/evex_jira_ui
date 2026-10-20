@@ -38,6 +38,9 @@ jobs:
           tests/test_dependency_contract.py::test_clean_runtime_imports_supported_entry_points
           --run-runtime-install --no-cov
 
+      - name: Check notebook outputs
+        run: uv run --frozen python tools/notebook_outputs.py --check
+
       - name: Run tests
         run: uv run --frozen --no-sync pytest --cov-report=xml
 
