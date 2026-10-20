@@ -202,7 +202,7 @@ class ApiErrorTests(unittest.TestCase):
             FakeClient(RuntimeError("connection reset")), "SDAX-9", "Summary: x"
         )
         self.assertIsNone(result["resolution_bucket"])
-        self.assertIn("connection reset", result["error"])
+        self.assertEqual(result["error"], "unexpected")
         self.assertEqual(result["key"], "SDAX-9")
 
     def test_wrong_deployment_is_reported_with_the_variable_to_fix(self):
@@ -214,7 +214,7 @@ class ApiErrorTests(unittest.TestCase):
             body=None,
         )
         result = ticket_classifier.classify_one(FakeClient(error), "SDAX-9", "x")
-        self.assertIn("AZURE_OPENAI_DEPLOYMENT_NAME", result["error"])
+        self.assertEqual(result["error"], "not_found")
 
     def test_content_filter_refusal_is_recorded_not_retried_forever(self):
         response = make_response(parsed=None, refusal="Ich kann das nicht beantworten.")
@@ -226,7 +226,7 @@ class ApiErrorTests(unittest.TestCase):
         result = ticket_classifier.classify_one(
             FakeClient(make_response(parsed=None)), "SDAX-9", "x"
         )
-        self.assertIn("no parsed output", result["error"])
+        self.assertEqual(result["error"], "invalid_output")
 
     def test_successful_parse_is_unpacked(self):
         parsed = ticket_classifier.TicketClassification(

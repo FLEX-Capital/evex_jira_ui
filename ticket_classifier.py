@@ -34,15 +34,19 @@ a json_schema and every ticket will come back as a bad_request error.
 import hashlib
 import os
 import threading
+from collections.abc import Mapping, Sized
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Any, Literal, Self, get_args
+from uuid import uuid4
 
 import openai
 import pandas as pd
 from openai import AzureOpenAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 import settings
+from operation_errors import safe_diagnostic
 from settings import load_settings
 
 CACHE_PATH = "data/sdax_classifications.parquet"
@@ -60,60 +64,72 @@ def resolve_deployment() -> str:
     return load_settings().azure_deployment or ""
 
 
-RESOLUTION_BUCKETS = (
-    "question_answer",
-    "support_todo",
-    "team_handoff",
-    "unclear",
-)
-
-SUB_BUCKETS = (
-    # question_answer
-    "how_to",
-    "where_to_find",
-    "policy_or_process_clarification",
-    # support_todo
+ResolutionBucket = Literal["question_answer", "support_todo", "team_handoff", "unclear"]
+QuestionAnswerSubBucket = Literal[
+    "how_to", "where_to_find", "policy_or_process_clarification"
+]
+SupportTodoSubBucket = Literal[
     "data_correction",
     "document_or_invoice_resend",
     "configuration_change",
     "permissions_or_access",
     "manual_workaround",
-    # team_handoff
+]
+TeamHandoffSubBucket = Literal[
     "bug",
     "feature_request",
     "database_fix",
     "hardware_or_infrastructure",
     "external_vendor",
-    # unclear
-    "insufficient_information",
-)
-
-AI_MODES = (
-    "fully_automatable",
-    "ai_drafts_human_sends",
-    "ai_assisted_triage",
-    "human_only",
-)
+]
+UnclearSubBucket = Literal["insufficient_information"]
+SubBucket = Literal[
+    QuestionAnswerSubBucket,
+    SupportTodoSubBucket,
+    TeamHandoffSubBucket,
+    UnclearSubBucket,
+]
+AIMode = Literal[
+    "fully_automatable", "ai_drafts_human_sends", "ai_assisted_triage", "human_only"
+]
+RESOLUTION_BUCKETS = get_args(ResolutionBucket)
+SUB_BUCKETS = get_args(SubBucket)
+AI_MODES = get_args(AIMode)
+_SUB_BUCKETS_BY_PARENT = {
+    "question_answer": get_args(QuestionAnswerSubBucket),
+    "support_todo": get_args(SupportTodoSubBucket),
+    "team_handoff": get_args(TeamHandoffSubBucket),
+    "unclear": get_args(UnclearSubBucket),
+}
 
 
 class TicketClassification(BaseModel):
     """One classified ticket. Field order is the order Claude reasons in."""
 
+    model_config = ConfigDict(extra="forbid")
+
     reasoning: str = Field(
         description="One sentence in English explaining the classification."
     )
-    resolution_bucket: str = Field(
+    resolution_bucket: ResolutionBucket = Field(
         description=f"One of: {', '.join(RESOLUTION_BUCKETS)}"
     )
-    sub_bucket: str = Field(description=f"One of: {', '.join(SUB_BUCKETS)}")
+    sub_bucket: SubBucket = Field(description=f"One of: {', '.join(SUB_BUCKETS)}")
     intent_label: str = Field(
         description=(
             "The recurring request type in 2-5 German words, lowercase, "
             "generic enough that similar tickets get the identical label."
         )
     )
-    ai_mode: str = Field(description=f"One of: {', '.join(AI_MODES)}")
+    ai_mode: AIMode = Field(description=f"One of: {', '.join(AI_MODES)}")
     confidence: float = Field(description="0.0 to 1.0.", ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_membership(self) -> Self:
+        """Require the sub-bucket to belong to its selected parent."""
+        if self.sub_bucket not in _SUB_BUCKETS_BY_PARENT[self.resolution_bucket]:
+            raise ValueError("invalid_taxonomy_pair")
+        return self
 
 
 SYSTEM_PROMPT = """\
@@ -193,35 +209,112 @@ def _hash_text(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
-def build_ticket_text(row, max_chars=6000):
-    """Render one ticket into the prompt text.
+class TicketInputError(ValueError):
+    """A safe row validation cause; source contents are never interpolated."""
 
-    Comments carry the resolution and are the most informative field, but they
-    are also the longest and are absent on most tickets. Summary and category
-    always come first so a truncated ticket still shows what it was about.
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+def scalar_text(value: object) -> str:
+    """Normalize missing scalars/empty containers; reject nonempty containers.
+
+    Args:
+        value: One optional ticket cell.
+
+    Returns:
+        Trimmed scalar text, or empty text for a missing value.
+
+    Raises:
+        TicketInputError: A nonempty unsupported container is not ticket text.
     """
-    parts = [f"Summary: {str(row.get('summary') or '').strip()}"]
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, Sized) and len(value) == 0:
+        return ""
+    if not pd.api.types.is_scalar(value) or isinstance(
+        value, (bytes, bytearray, memoryview)
+    ):
+        raise TicketInputError("invalid_text")
+    if value is None or bool(pd.isna(value)):
+        return ""
+    return str(value).strip()
 
-    haupt = str(row.get("Hauptkategorie") or "").strip()
-    unter = str(row.get("Unterkategorie") or "").strip()
-    if haupt and haupt.lower() not in ("nan", "none"):
-        category = haupt
-        if unter and unter.upper() not in ("NA", "NAN", "NONE"):
-            category += f" / {unter}"
+
+def _ticket_fields(row: Mapping[str, Any]) -> dict[str, str]:
+    fields = {
+        name: scalar_text(row.get(name))
+        for name in (
+            "summary",
+            "Hauptkategorie",
+            "Unterkategorie",
+            "description",
+            "comments",
+        )
+    }
+    for name in ("Hauptkategorie", "description", "comments"):
+        if fields[name].lower() in ("nan", "none") or (
+            name == "comments" and fields[name] == "[]"
+        ):
+            fields[name] = ""
+    if fields["Unterkategorie"].upper() in ("NA", "NAN", "NONE"):
+        fields["Unterkategorie"] = ""
+    return fields
+
+
+def _render_ticket_text(fields: Mapping[str, str], max_chars: int) -> str:
+    if type(max_chars) is not int or max_chars <= 0:
+        raise TicketInputError("invalid_text_limit")
+    parts = [f"Summary: {fields['summary']}"]
+    if fields["Hauptkategorie"]:
+        category = fields["Hauptkategorie"]
+        if fields["Unterkategorie"]:
+            category += f" / {fields['Unterkategorie']}"
         parts.append(f"Category: {category}")
-
-    description = str(row.get("description") or "").strip()
-    if description and description.lower() not in ("nan", "none"):
-        parts.append(f"Description: {description}")
-
-    comments = str(row.get("comments") or "").strip()
-    if comments and comments.lower() not in ("nan", "none", "[]"):
-        parts.append(f"Comments:\n{comments}")
-
+    if fields["description"]:
+        parts.append(f"Description: {fields['description']}")
+    if fields["comments"]:
+        parts.append(f"Comments:\n{fields['comments']}")
     text = "\n\n".join(parts)
-    if len(text) > max_chars:
-        text = text[:max_chars] + "\n[...truncated]"
-    return text
+    return text[:max_chars] + "\n[...truncated]" if len(text) > max_chars else text
+
+
+def build_ticket_text(row: Mapping[str, Any], max_chars: int = 6000) -> str:
+    """Render summary/category/description/comments with the existing cap and suffix.
+
+    Args:
+        row: One ticket's optional text fields; no key is needed for rendering.
+        max_chars: Prefix length before the existing truncation marker.
+
+    Returns:
+        Deterministic prompt text, with summary first.
+    """
+    return _render_ticket_text(_ticket_fields(row), max_chars)
+
+
+def validate_ticket_input(
+    row: Mapping[str, Any], *, max_chars: int = 6000
+) -> tuple[str, str]:
+    """Validate a ticket identity and substantive text before scheduling model work.
+
+    Args:
+        row: One candidate ticket record.
+        max_chars: Rendered-text prefix cap.
+
+    Returns:
+        The trimmed key and deterministic rendered text.
+
+    Raises:
+        TicketInputError: Invalid key, unsupported cell, or entirely empty ticket text.
+    """
+    key = row.get("key")
+    if not isinstance(key, str) or not key.strip():
+        raise TicketInputError("invalid_key")
+    fields = _ticket_fields(row)
+    if not any(fields[name] for name in ("summary", "description", "comments")):
+        raise TicketInputError("empty_text")
+    return key.strip(), _render_ticket_text(fields, max_chars)
 
 
 def load_cache(cache_path=None):
@@ -267,10 +360,21 @@ def save_cache(frame, cache_path=None):
         atomic_write(cache_path, lambda handle: frame.to_parquet(handle, index=False))
 
 
-def classify_one(client, key, text, model=None):
-    """Classify a single ticket. Returns a result dict; never raises."""
-    model = model or resolve_deployment()
+class ClassificationOutputError(ValueError):
+    """A bounded refusal/empty-output cause, independent of provider payload text."""
+
+    def __init__(self, code: Literal["refusal", "invalid_output"]) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+def classify_one(
+    client: Any, key: str, text: str, model: str | None = None
+) -> dict[str, Any]:
+    """Classify one ticket, retaining usage or a bounded payload-free error code."""
+    error: str
     try:
+        model = model or resolve_deployment()
         response = client.chat.completions.parse(
             model=model,
             # Reasoning deployments (gpt-5.x) reject any temperature but the
@@ -289,10 +393,13 @@ def classify_one(client, key, text, model=None):
         # support text (medical context, personal data), not a transport error,
         # so record it instead of retrying it forever.
         if message.refusal:
-            raise ValueError(f"refusal: {message.refusal}")
+            raise ClassificationOutputError("refusal")
         parsed = message.parsed
         if parsed is None:
-            raise ValueError("no parsed output returned")
+            raise ClassificationOutputError("invalid_output")
+        parsed = TicketClassification.model_validate(
+            parsed.model_dump() if isinstance(parsed, BaseModel) else parsed
+        )
         usage = getattr(response, "usage", None)
         details = getattr(usage, "completion_tokens_details", None)
         return {
@@ -315,22 +422,30 @@ def classify_one(client, key, text, model=None):
     # Most-specific first: a bad request or a missing deployment is a bug in the
     # configuration and must not be silently retried by the caller as if it were
     # load. On Azure a wrong deployment name surfaces as NotFoundError.
-    except openai.LengthFinishReasonError as exc:
-        error = f"truncated: {exc}"
-    except openai.ContentFilterFinishReasonError as exc:
-        error = f"content_filter: {exc}"
-    except openai.BadRequestError as exc:
-        error = f"bad_request: {exc}"
-    except openai.NotFoundError as exc:
-        error = f"not_found (check AZURE_OPENAI_DEPLOYMENT_NAME): {exc}"
-    except openai.RateLimitError as exc:
-        error = f"rate_limited: {exc}"
-    except openai.APIStatusError as exc:
-        error = f"http_{exc.status_code}: {exc}"
-    except openai.APIConnectionError as exc:
-        error = f"connection: {exc}"
-    except Exception as exc:  # noqa: BLE001 - one bad ticket must not kill the run
-        error = f"{type(exc).__name__}: {exc}"
+    except ClassificationOutputError as exc:
+        error = exc.code
+    except ValidationError:
+        error = "invalid_output"
+    except openai.LengthFinishReasonError:
+        error = "truncated"
+    except openai.ContentFilterFinishReasonError:
+        error = "content_filter"
+    except openai.BadRequestError:
+        error = "bad_request"
+    except openai.NotFoundError:
+        error = "not_found"
+    except openai.RateLimitError:
+        error = "rate_limited"
+    except openai.APITimeoutError:
+        error = "timeout"
+    except openai.APIConnectionError:
+        error = "connection"
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 - isolate a provider failure for this ticket
+        error = safe_diagnostic(
+            exc, operation_id=uuid4().hex, stage="fetch", key=key
+        ).code
     return {
         "key": key,
         "text_hash": _hash_text(text),
@@ -375,7 +490,15 @@ def classify_tickets(
     )
     model = model or resolve_deployment()
     cache = load_cache(cache_path)
-    texts = {row["key"]: build_ticket_text(row) for _, row in df.iterrows()}
+    texts = {}
+    row_errors = []
+    for position, (_, row) in enumerate(df.iterrows()):
+        try:
+            key, text = validate_ticket_input(row.to_dict())
+        except TicketInputError as exc:
+            row_errors.append({"index": position, "code": exc.code})
+            continue
+        texts[key] = text
 
     if force:
         done = {}
@@ -391,6 +514,7 @@ def classify_tickets(
 
     if not pending:
         print(f"Nothing to classify - {len(cache)} tickets already cached.")
+        cache.attrs["classification_errors"] = row_errors
         return cache
 
     estimated = sum(len(text) for _, text in pending) / 4
@@ -466,4 +590,5 @@ def classify_tickets(
         ).value_counts()
         print("Failure reasons:")
         print(reasons.to_string())
+    merged.attrs["classification_errors"] = row_errors
     return merged
