@@ -10,7 +10,7 @@ from typing import overload
 import pandas as pd
 
 from cache_schema import CacheReadError, normalize_frame
-from file_io import Revision, atomic_write, path_lock
+from file_io import Revision, atomic_write, lock_exclusive, path_lock
 from settings import DEFAULT_TENANT, TENANT_ATTR, Settings, SettingsError, load_settings
 
 DATA_PATH = "data/jira_data.pkl"
@@ -30,12 +30,19 @@ class ImportBusyError(RuntimeError):
 
 @contextmanager
 def import_operation_lock(data_path: str | Path | None = None) -> Iterator[None]:
-    """Serialize imports for the selected ticket cache using a separate operation lock."""
+    """Admit one import at a time across the UI worker and CLI processes.
+
+    Args:
+        data_path: Ticket cache path; the configured cache when omitted.
+
+    Raises:
+        ImportBusyError: Another import holds the lock.
+    """
     path = _ticket_path(data_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with Path(f"{path}.import.lock").open("a+b") as handle:
         try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_exclusive(handle, blocking=False)
         except BlockingIOError as exc:
             raise ImportBusyError(
                 "Ein Datenimport läuft bereits. Bitte später erneut versuchen."

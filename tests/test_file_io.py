@@ -134,6 +134,29 @@ def test_unique_temporary_and_nested_lock_are_process_safe(tmp_path: Path) -> No
             child.join(3)
 
 
+def test_smb_lock_refusal_reports_busy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Azure Files refuses a held LOCK_NB with EACCES; callers still see busy, not denied."""
+    import errno
+    import fcntl
+
+    import data_loading
+    import file_io
+
+    def smb_flock(handle: Any, operation: int) -> None:
+        if operation != fcntl.LOCK_UN:
+            raise PermissionError(errno.EACCES, "Permission denied")
+
+    monkeypatch.setattr(fcntl, "flock", smb_flock)
+    with pytest.raises(BlockingIOError), file_io.path_lock(tmp_path / "a", blocking=False):
+        pass
+    with pytest.raises(data_loading.ImportBusyError):
+        with data_loading.import_operation_lock(tmp_path / "jira_data.pkl"):
+            pass
+    # A blocking flock never refuses for contention, so EACCES there is a real failure.
+    with pytest.raises(PermissionError), file_io.path_lock(tmp_path / "b"):
+        pass
+
+
 @pytest.mark.parametrize(
     "modules",
     list(itertools.permutations(("file_io", "sync_checkpoints", "desk_sync"))),

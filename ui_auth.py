@@ -65,8 +65,8 @@ def require_current_session() -> None:
 def require_password() -> None:
     """Require the current password generation before rendering private UI.
 
-    - Set `UI_PASSWORD` in `.env` or the server environment (e.g. a Render env var)
-      to enable.
+    - Set `UI_PASSWORD` in `.env` or the server environment (on Azure, a Key
+      Vault-backed Container App secret) to enable.
     - If `UI_PASSWORD` is not set, the UI will be accessible without a password.
     """
     password = configured_password()

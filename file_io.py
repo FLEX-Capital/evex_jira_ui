@@ -1,5 +1,6 @@
 """Neutral file publication and reentrant path transactions for local storage."""
 
+import errno
 import fcntl
 import json
 import os
@@ -101,6 +102,27 @@ def write_json_atomic(path: Path, value: object) -> None:
     atomic_write(Path(path), serialize)
 
 
+def lock_exclusive(handle: BinaryIO, *, blocking: bool = True) -> None:
+    """Take an exclusive flock, reporting a refused non-blocking attempt uniformly.
+
+    Azure Files (SMB) refuses a contended LOCK_NB with EACCES where local filesystems
+    use EAGAIN; both mean another descriptor holds the lock.
+
+    Args:
+        handle: Open file whose descriptor is locked.
+        blocking: Wait for the lock instead of refusing while it is held.
+
+    Raises:
+        BlockingIOError: Non-blocking, and another descriptor holds the lock.
+    """
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+    except PermissionError as exc:
+        if blocking or exc.errno != errno.EACCES:
+            raise
+        raise BlockingIOError(errno.EAGAIN, "path_busy") from exc
+
+
 @contextmanager
 def path_lock(path: Path, *, blocking: bool = True) -> Iterator[None]:
     """Serialize threads/processes by path; optional refusal of active writers."""
@@ -118,7 +140,7 @@ def path_lock(path: Path, *, blocking: bool = True) -> Iterator[None]:
             return
         path.parent.mkdir(parents=True, exist_ok=True)
         with Path(f"{path}.lock").open("a+b") as handle:
-            fcntl.flock(handle, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+            lock_exclusive(handle, blocking=blocking)
             held.add(path)
             try:
                 yield
