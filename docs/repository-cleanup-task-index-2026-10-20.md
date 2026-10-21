@@ -18,7 +18,7 @@ Phase 6 is independently reviewed: 567 passed, 127 subtests, 88% coverage;
 see its verification (optional local file `docs/superpowers/verification/2026-10-20-repository-cleanup-phase-6.md`).
 Phase 7 is independently reviewed and corrected: 592 passed, 127 subtests, 93% combined coverage;
 see its verification (optional local file `docs/superpowers/verification/2026-10-20-repository-cleanup-phase-7.md`).
-Phase 8 implementation is complete; its independent final review is pending. See the
+Phase 8 implementation and independent final review are complete; no Critical/Important findings remain. See the
 [final verification report](repository-cleanup-verification-2026-10-20.md) for application-only
 coverage, runtime integration and issue dispositions. The shared execution contract
 and protected phase 0/Azure foundation still apply.

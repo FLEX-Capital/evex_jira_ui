@@ -12,7 +12,7 @@ This historical inventory records **40 findings**. Their current local implement
 and verification status, plus additional M01, are recorded in the
 [cleanup verification report](repository-cleanup-verification-2026-10-20.md).
 All original findings have local implementation evidence; deployed acceptance for
-I02 and the staging checklist remain open. Four minor review follow-ups are listed
+I02 and the staging checklist remain open. Six minor review follow-ups are listed
 separately. The evidence and proposed fixes below describe the original review
 snapshot; source line references are historical and may have moved.
 

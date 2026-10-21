@@ -1,16 +1,16 @@
 # Repository cleanup verification
 
-Date: 20 October 2026. All 33 approved phase 1–8 implementation tasks are delivered locally. Phases 1–7 have independent reviews and verified correction passes. Final phase 8 independent review is pending. This report separates local evidence from deployment acceptance.
+Implementation: 20 October 2026. Final verification: 21 October 2026. All 33 approved phase 1–8 implementation tasks are delivered locally. Phases 1–7 have independent reviews and verified correction passes. Phase 8 independently passed all five review focuses with no Critical/Important findings; two Minor follow-ups are deferred. This report separates local evidence from deployment acceptance.
 
 ## Final local checks
 
-- Complete offline suite: **623 passed, 4 opt-in skips, 127 subtests, 7 existing warnings**. Application statement coverage is **93.62% (3551/3793)**, above the required 80%. All 33 runtime modules are included; analysis/deck/notebooks/tools/tests are explicitly separate.
+- Committed-source export of `066a1d8`: **622 passed, 4 opt-in skips, 127 subtests, 7 existing warnings**. Application statement coverage is **93.61% (3543/3785)**, above the required 80%. All 33 runtime modules are included; analysis/deck/notebooks/tools/tests are explicitly separate.
 - Separate analysis/deck suite: **106 passed**, **90.41% (811/897)** across analysis_workflow, classification_cache, ticket_classifier and the frozen deck. Independent coverage basenames prevent accidental cross-report merging.
-- Explicit clean-runtime/image integration: **31 passed** using a fresh hash-checked Python 3.12 environment and an actual local Docker image, with no analysis/dev packages in the image.
+- Explicit committed-source clean-runtime/image integration: **31 passed** using a fresh hash-checked Python 3.12 environment and an actual local Docker image, with no analysis/dev packages in the image.
 - Strict native mypy: **42 maintained source files pass**; native Ruff check/format passes. Negative/positive fixtures prove enforcement, including isolated index/config bytes.
 - Dependency lock check and generated hashed runtime export byte parity pass. All **4 tracked notebooks**, including archives, pass the recursive output guard. Local documentation and tracked-index fresh-clone export checks pass. Actionlint, configured YAML/TOML formatting, Docker command guards, hadolint and whitespace checks pass.
 
-The local CI-equivalent commands have been exercised; no GitHub Actions run was triggered. The ordinary suite uses synthetic records and blocks Requests plus HTTPX and HTTPX2 synchronous/asynchronous transports before DNS. MockTransport and injected fake clients still exercise intended API behavior. Actual SDK default-client escape is tested. Notebook kernels additionally install their own transport guards. Runtime install and image suites are explicit opt-ins, with unique owned images/containers removed in finally blocks; health checks use container-local loopback.
+The local CI-equivalent commands have been exercised; no GitHub Actions run was triggered. The ordinary suite uses synthetic records and blocks Requests plus HTTPX and HTTPX2 synchronous/asynchronous transports before DNS. MockTransport and injected fake clients still exercise intended API behavior. Actual SDK default-client escape is tested. Notebook kernels additionally install their own transport guards. The preserved working checkout also passes 623 tests at 93.62%, including one separately owned SMB test/helper; that additional test is absent from the committed-source export. Runtime install and image suites are explicit opt-ins, with unique owned images/containers removed in finally blocks; health checks use container-local loopback.
 
 A runtime smoke case also reproduced a valid one-ticket cohort crashing with duplicate Plotly IDs. Stable per-view chart keys fix it; the new AppTest regression was observed RED then GREEN and existing widget keys/cohorts remain intact.
 
@@ -20,7 +20,7 @@ Ticket schema 2 normalizes legacy data only in memory on ordinary reads. Country
 
 Migration and retention start with read-only inspection. Apply requires the reviewed revision or digest and revalidates active writers. Migration creates an exact backup; pruning cannot be rolled back by code changes. Stop all writers and restore the paired application version and untouched backup together. No real-cache migration, rebuild, pruning, Git history rewrite, paid classification, live Jira/Assets call, deployment, push or merge was performed.
 
-Existing Azure infrastructure, deployment prose and SMB-specific lock adaptation remain separately owned working-copy changes. Commits used an isolated index and preserved unrelated entries. Local runtime checks used the preserved checkout; actual mounted Azure Files behavior remains unverified. The image contains no tests, tools, analysis/deck/classifier sources, caches, secrets, infrastructure or development metadata. It retains UID/GID 10001, a writable data root, the quoted PORT argument, healthcheck and default CORS/XSRF protections. The real installed PyGWalker adapter is imported before its browser rendering is replaced in AppTest; browser behavior remains staging work.
+Existing Azure infrastructure, deployment prose and SMB-specific lock adaptation remain separately owned working-copy changes. Commits used an isolated index and preserved unrelated entries. The final full-suite and all 31 runtime checks also pass from committed blobs alone, excluding those working-copy edits. Actual mounted Azure Files behavior remains unverified. The image contains no tests, tools, analysis/deck/classifier sources, caches, secrets, infrastructure or development metadata. It retains UID/GID 10001, a writable data root, the quoted PORT argument, healthcheck and default CORS/XSRF protections. The real installed PyGWalker adapter is imported before its browser rendering is replaced in AppTest; browser behavior remains staging work.
 
 ## Issue dispositions
 
@@ -84,7 +84,14 @@ Every original finding I01–I40 and the additional M01 has an owning task and l
 - Phase 7: pilot narrative still describes paid/reasoning sampling although the preview now shows cache-only aggregates.
 - Phase 7: management summary label remains Amparex/SDAX despite configurable PROJECT.
 
+- Phase 8: inline-code heading text is removed by the docs checker, causing valid anchors to fail and shortened invalid anchors to pass; existing maintained links pass.
+- Phase 8: the `.gitignore` deck regeneration comment says `--group dev` instead of `--group analysis`; maintained deck/analysis guides are correct.
+
 These are reviewer follow-ups, separate from the original 40 findings. No minor entered the prescribed correction pass.
+
+## Independent final phase review
+
+A fresh gpt-6-astra/high reviewer examined committed `066a1d8`, all five approved focus areas and adjacent integration boundaries. It independently ran **59 focused tests**, all passing with additional DNS/socket connection blocking, and inspected committed-export full/runtime evidence. Verdict: **ready for phase 8 acceptance; no Critical or Important findings**. Both Minor findings are listed above. No second review or correction pass was needed.
 
 ## Rulings and review decisions
 
@@ -241,3 +248,11 @@ The following preserves all recorded decisions and their stated cost. Local gene
 - Task 5: Ruling: guard HTTPX2 as well as HTTPX/Requests whenever installed — the locked Azure SDK uses the separate HTTPX2 implementation, while runtime-only jobs need not install the analysis SDK; cost if wrong: future transport implementations require their own explicit guard. Actual SDK default transport and five client paths fail before DNS; in-memory transports remain usable. Application coverage excludes only the declared analysis/deck/tools/tests, with the complete 33-module runtime closure checked against omissions; analysis/deck receives a separate report.
 - Task 5: Ruling: separate analysis data basename from the application .coverage.* combine namespace and explicitly exclude notebook execution from app coverage — actual parallel reports exposed automatic cross-scope merging; a CoverageData regression reproduced merge/deletion RED then GREEN with analysis.coverage. Cost if wrong: new report producers must retain independent prefixes. The first 621-case run was GREEN but its 93.01% was combined rather than application-only, so it is superseded by corrected evidence.
 - Task 5: Ruling: synthetic Git fixture helpers clear inherited GIT_INDEX_FILE and tool fixtures restore it after each test — intended-index focused execution exposed test-only writes to that disposable index, never the normal user index; the index is regenerated from HEAD. New caller-index byte preservation regression observed RED then GREEN. Cost if wrong: fixtures validate explicit alternate-index arguments rather than inheriting caller repository state.
+- Final: Ruling: live ingress, CORS/XSRF, SSO, hostname and browser widgets — remain explicitly pending staging; local AppTest and localhost health do not establish live integration — cost if wrong: actual ingress/auth/widget incompatibilities can still require corrections.
+- Final: Ruling: Azure Files/SMB locks, crash durability, restart and replicas — remain target-environment acceptance at one replica; protected dirty foundation was excluded from committed-source evidence — cost if wrong: live filesystem/recovery guarantees and scaling remain unverified.
+- Final: Ruling: real Jira/model authentication, throttling, schemas and classification quality — remain outside authorized offline validation; no real credentials or paid calls were used — cost if wrong: real tenant/service variations and classification quality can differ.
+- Final: Ruling: exact historical PositionToOffset crash reproduction — accept direct native failure/location/payload regression evidence while preserving the unsuccessful old-adapter reproduction result — cost if wrong: exact historical trigger conditions remain unknown.
+- Final: Ruling: archive/frozen-deck source lint and typing — retain approved separate scope, with all notebook outputs guarded and historical deck snapshot tested — cost if wrong: unsupported historical code needs its original environment and does not receive maintained type guarantees.
+- Final: Ruling: historical Git line fragments — retain syntactic historical references, not assertions about current source positions — cost if wrong: old line links may point at moved code.
+- Final: Ruling: remote GitHub Actions and externally downloaded Trunk tooling — local CI-equivalent commands and active hooks passed; no remote run or tooling supply-chain audit was authorized — cost if wrong: remote runners/downloads can fail despite local checks.
+- Final: Ruling: future pandas-version warnings — retain the locked below-3 compatibility bound and record existing warnings; dependency upgrades are separate work — cost if wrong: a future upgrade may need migration fixes.

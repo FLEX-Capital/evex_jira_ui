@@ -2,7 +2,7 @@
 
 Date: 2026-10-19; implementation checkpoint: 2026-10-20.
 All 33 approved phase 1–8 tasks are implemented locally. Phases 0–7 have independent
-reviews; final phase 8 review is pending. The [verification report](repository-cleanup-verification-2026-10-20.md)
+reviews; phase 8 independently passed all five review focuses on 21 October. The [verification report](repository-cleanup-verification-2026-10-20.md)
 contains actual checks, every I01–I40/M01 disposition, review decisions and deferred
 minors. Deployed I02 acceptance and the explicit staging checklist remain pending.
 
