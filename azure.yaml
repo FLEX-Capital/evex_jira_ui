@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+# Azure Developer CLI project. Infrastructure: infra/ (Bicep). See README "Deploying to Azure".
+name: evex-jira-ui
+metadata:
+  template: azd-init
+
+services:
+  jira-ui:
+    project: .
+    host: containerapp
+    language: python
+    docker:
+      path: ./Dockerfile
+      # Build in Azure Container Registry: produces a linux/amd64 image from any laptop.
+      remoteBuild: true

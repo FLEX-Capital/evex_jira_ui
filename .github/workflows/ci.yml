@@ -16,9 +16,9 @@ jobs:
       pull-requests: write
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
       - name: Set up Python 3.12
         run: uv python install 3.12
       - name: Install dependencies
@@ -30,7 +30,7 @@ jobs:
       - name: Offline tests and application coverage
         run: uv run --frozen --no-sync pytest --cov-fail-under=80 --cov-report=xml
       - name: Coverage comment
-        uses: MishaKav/pytest-coverage-comment@v1.10.0
+        uses: MishaKav/pytest-coverage-comment@fd9adbdca9fdfbe2b9bfa44a7340e6a83346ce6c # v1.10.0
         if: >-
           github.event_name == 'pull_request' &&
           github.event.pull_request.head.repo.full_name == github.repository
@@ -55,9 +55,9 @@ jobs:
     env:
       TRUNK_TELEMETRY: "off"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
       - name: Set up Python 3.12
         run: uv python install 3.12
       - name: Install locked analysis and development groups
@@ -71,14 +71,14 @@ jobs:
       - name: Check tracked documentation links
         run: uv run --frozen --no-sync python tools/check_docs.py --tracked
       - name: Trunk check
-        uses: trunk-io/trunk-action@v1.3.1
+        uses: trunk-io/trunk-action@04ba50e7658c81db7356da96657e6e77f220bfa3 # v1.3.1
 
   runtime-install:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
       - name: Set up Python 3.12
         run: uv python install 3.12
       - name: Install runtime and test driver
@@ -91,9 +91,9 @@ jobs:
   runtime-image:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
       - name: Set up Python 3.12
         run: uv python install 3.12
       - name: Install runtime and test driver

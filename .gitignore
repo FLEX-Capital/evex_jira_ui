@@ -1,11 +1,9 @@
-# Data cache and generated exports are not committed, but two files under
-# data/ are required at runtime and must stay tracked:
-#   evex_logo.png          -> app.py sidebar
-#   object_id_to_name.json -> imported by data_transformation.py at module load
-data/*
-!data/evex_logo.png
-!data/object_id_to_name.json
+# data/ holds only runtime state (ticket cache, checkpoints, exports) and is never
+# committed. On Azure it is an Azure Files mount. Tracked static files live in assets/.
+data/
 .env
+# azd environments (.azure/<env>/.env holds deployment secrets) and the working plan.
+.azure/
 __pycache__/*
 **/__pycache__/
 **/.DS_Store

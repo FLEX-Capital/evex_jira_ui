@@ -51,9 +51,10 @@ Inject `UI_PASSWORD` through the launcher or server environment to require a log
 before ticket data or import controls are shown. The effective process environment
 is the only application configuration source. Password changes revoke the current
 session generation, including fragment actions. Without it, the dashboard remains accessible
-without a password. Docker builds exclude local environment files, ticket caches,
-and backups; provide credentials at runtime and use persistent storage for `data/`.
-Only the logo and legacy category map from `data/` are bundled in the image.
+without a password. Docker builds exclude local environment files and the whole
+`data/` directory (ticket caches, backups); provide credentials at runtime and mount
+persistent storage at `data/`. The logo and legacy category map live in `assets/`
+and are bundled in the image.
 
 `DATA_DIR` defaults to project-relative `data/`; a relative override is resolved
 against the project directory, regardless of the shell's working directory. Static
@@ -61,6 +62,66 @@ assets stay under project-relative `assets/`. Explicit CLI path flags keep their
 usual working-directory semantics. Jira tenant overrides are `JIRA_CLOUD_ID` and
 `JIRA_WORKSPACE_ID`; their defaults preserve the historical tenant, and another
 tenant cannot reuse an unproven legacy ticket/country cache. Versioned country persistence isolates results by tenant and workspace.
+
+## Deploying to Azure
+
+The dashboard runs on Azure Container Apps in the `evex_jira_ui` resource group
+(Germany West Central, subscription "Azure subscription 1"). `azure.yaml` and the
+Bicep in `infra/` describe it; deploy with the [Azure Developer CLI](https://aka.ms/azd).
+
+| Resource                      | Purpose                                                                                                                             |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Container App `ca-jira-ui-*`  | Streamlit with exactly one always-on replica: the import worker is an in-process thread and the cache locks assume a single process |
+| Azure Files share `jira-data` | Mounted at `/app/data`: ticket cache, checkpoints, `import_status.json`, backups                                                    |
+| Key Vault `kv-*`              | `JIRA_USERNAME`, `JIRA_PASSWORD`, `UI_PASSWORD`                                                                                     |
+| Container Registry `cr*`      | Images, built in Azure (`remoteBuild`), so no local amd64 build is needed                                                           |
+
+The app runs in the shared Container Apps environment `cae-evex` (resource group
+`evex_customer_support`, managed by Terraform there), because creating a dedicated
+environment in Germany West Central failed for lack of regional capacity. Container
+logs therefore go to that environment's Log Analytics workspace. The deployment adds
+one storage definition, `jira-ui-data`, to `cae-evex` and changes nothing else there;
+`azd down` does not remove it.
+
+Required azd environment values:
+
+| Variable        | Notes                                                      |
+| --------------- | ---------------------------------------------------------- |
+| `JIRA_URL`      | `https://amparex.atlassian.net`                            |
+| `JIRA_USERNAME` | Jira account                                               |
+| `JIRA_PASSWORD` | The account's API token                                    |
+| `UI_PASSWORD`   | At least 12 characters; required because the URL is public |
+
+azd keeps these in `.azure/<env>/.env` (gitignored and excluded from images);
+provisioning writes the secrets to Key Vault. First deployment:
+
+```sh
+az login --tenant eb15ebac-a9e7-43c7-bd1c-b99f13afdda9
+azd auth login --tenant-id eb15ebac-a9e7-43c7-bd1c-b99f13afdda9
+azd env new evex-jira-ui --subscription c3f253c2-c792-4a6e-878e-c5d49e589d6c --location germanywestcentral
+azd env set JIRA_URL https://amparex.atlassian.net
+azd env set JIRA_USERNAME <user>
+azd env set JIRA_PASSWORD <api-token>
+azd env set UI_PASSWORD <password>
+azd up         # provisions with a placeholder image, then builds and deploys the app
+azd provision  # once more: keeps the deployed image and pins the always-on replica
+```
+
+The data share starts empty; run **Backfill / Datenimport** in the hosted UI for the
+first import. Afterwards use `azd deploy` for code changes and `azd provision` for
+`infra/` changes. Follow logs with
+`az containerapp logs show -g evex_jira_ui -n <app> --follow`. Run CLI maintenance
+such as `backfill_jira.py` inside the replica with
+`az containerapp exec -g evex_jira_ui -n <app> --command "python backfill_jira.py ..."`,
+so it shares the mounted data and the operation lock.
+
+The deploying account is Contributor and cannot create role assignments, so the app
+pulls images with the registry admin credential and reads Key Vault through an access
+policy. With an Owner-granted role both can move to managed-identity RBAC without code
+changes. Key Vault has purge protection: after `azd down` its name stays reserved for
+7 days, so reprovisioning within that window needs a new environment name. Authentik
+SSO can later be added as a custom OpenID Connect provider in Container Apps
+authentication, replacing `UI_PASSWORD`.
 
 ## Euronet import
 
@@ -270,25 +331,6 @@ an operation lock; a competing import is rejected while one is active. Safe
 merging preserves intervening source/country maintenance updates. To roll back
 a migration, stop writers and restore its backup to `data/jira_data.pkl`.
 
-A fully successful dashboard refresh writes all desks' fetched raw results once
-to `data/jira_issues.json`. A project failure preserves the previous raw snapshot.
-This JSON represents the fetched window, not the full historical pickle cache.
-Its `data/jira_issues.meta.json` companion retains the originating run ID, request
-window and desks, publication time, issue count, and SHA-256 digest even after a
-later import replaces the shared status. The digest must match the raw file
-before using that metadata: publication errors can leave an older sidecar.
-
-```sh
-uv run --frozen --no-sync python -m pytest -q
-```
-
-Tests cover company subsets and Streamlit rendering, import timezone boundaries,
-checkpoint reuse, partial failures, Assets routing, legacy transformation fixtures,
-Euronet escalation flags, upsert behavior, and failed cache writes. They use
-synthetic records and replace external API calls; no live account is required.
-
-See the [development guide](docs/development.md) for supported setup, shared
-architecture, offline validation and explicit maintenance procedures.
 Ticket artifacts store schema version 2 in `DataFrame.attrs`. Ordinary reads
 normalize unversioned/version 1 data in memory and preserve its bytes on disk.
 Corrupt, malformed and unsupported future schemas report an explicit error.
@@ -316,6 +358,7 @@ success, 2 for invalid/stale/busy input and 3 for I/O failure. No Jira/model cal
 occur. Use an explicit path under your configured `DATA_DIR` for mounted data.
 Stop all writers before rollback and restore the paired application version and
 untouched backup together; never run old/new schema writers on one directory.
+
 Retention also starts with inspection:
 
 ```sh
@@ -340,6 +383,26 @@ failure or later concurrent change can stop partway and reports exact deleted
 and failed paths with a nonzero exit code. **Deletion is irreversible**; rolling
 application code back does not restore pruned backups. Real pruning requires a
 separate explicit invocation after candidate review.
+
+A fully successful dashboard refresh writes all desks' fetched raw results once
+to `data/jira_issues.json`. A project failure preserves the previous raw snapshot.
+This JSON represents the fetched window, not the full historical pickle cache.
+Its `data/jira_issues.meta.json` companion retains the originating run ID, request
+window and desks, publication time, issue count, and SHA-256 digest even after a
+later import replaces the shared status. The digest must match the raw file
+before using that metadata: publication errors can leave an older sidecar.
+
+```sh
+uv run --frozen --no-sync python -m pytest -q
+```
+
+Tests cover company subsets and Streamlit rendering, import timezone boundaries,
+checkpoint reuse, partial failures, Assets routing, legacy transformation fixtures,
+Euronet escalation flags, upsert behavior, and failed cache writes. They use
+synthetic records and replace external API calls; no live account is required.
+
+See the [development guide](docs/development.md) for supported setup, shared
+architecture, offline validation and explicit maintenance procedures.
 
 ## Analysis
 
