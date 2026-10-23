@@ -22,9 +22,18 @@ runtimes:
 # This is the section where you manage your linters.
 # (https://docs.trunk.io/check/configuration)
 lint:
+  definitions:
+    # Trunk plugin v1.11.0 still passes pinact v4 flags (-format), which v5 rejects;
+    # tools/trunk_pinact.py runs the plugin's wrapper with two-dash flags. Remove this
+    # override and the tool once the plugin supports pinact v5.
+    - name: pinact
+      commands:
+        - name: lint
+          run: python3 ${workspace}/tools/trunk_pinact.py ${plugin}/linters/pinact/pinact_run.py ${target}
+        - name: upgrade
+          run: python3 ${workspace}/tools/trunk_pinact.py ${plugin}/linters/pinact/pinact_run.py --upgrade ${target}
   enabled:
-    # Trunk plugin v1.11.0 wraps pinact with v4 flags; v5 rejects them.
-    - pinact@4.0.0
+    - pinact@5.0.1
     - actionlint@1.7.12
     - yamllint@1.38.0
     - bandit@1.9.4
@@ -37,9 +46,9 @@ lint:
     - osv-scanner@2.7.0
     - oxipng@10.2.1
     - prettier@3.9.10
-    - ruff@0.17.1
+    - ruff@0.17.2
     - taplo@0.10.0
-    - trufflehog@3.99.3
+    - trufflehog@3.99.4
   ignore:
     # Native python-quality checks notebooks without the broken location adapter.
     - linters: [ruff]

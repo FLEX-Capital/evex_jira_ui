@@ -65,23 +65,31 @@ tenant cannot reuse an unproven legacy ticket/country cache. Versioned country p
 
 ## Deploying to Azure
 
-The dashboard runs on Azure Container Apps in the `evex_jira_ui` resource group
-(Germany West Central, subscription "Azure subscription 1"). `azure.yaml` and the
-Bicep in `infra/` describe it; deploy with the [Azure Developer CLI](https://aka.ms/azd).
+The dashboard runs on Azure Container Apps in West Europe, in the `evex_jira_ui`
+resource group of the subscription "EVEX n8n at FLEX" (azd environment
+`evex-jira-ui-n8n`): <https://ca-evex-jira-ui.livelyhill-63d4599b.westeurope.azurecontainerapps.io>.
+`azure.yaml` and the Bicep in `infra/` describe it; deploy with the
+[Azure Developer CLI](https://aka.ms/azd). West Europe, because Germany West Central
+could not create new Container Apps environments (`AKSCapacityHeavyUsage`) in either
+subscription. The resource group itself was created in Germany West Central; a group's
+region is metadata only, so `AZURE_RESOURCE_GROUP_LOCATION` keeps it.
 
-| Resource                      | Purpose                                                                                                                             |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Container App `ca-jira-ui-*`  | Streamlit with exactly one always-on replica: the import worker is an in-process thread and the cache locks assume a single process |
-| Azure Files share `jira-data` | Mounted at `/app/data`: ticket cache, checkpoints, `import_status.json`, backups                                                    |
-| Key Vault `kv-*`              | `JIRA_USERNAME`, `JIRA_PASSWORD`, `UI_PASSWORD`                                                                                     |
-| Container Registry `cr*`      | Images, built in Azure (`remoteBuild`), so no local amd64 build is needed                                                           |
+| Resource                            | Purpose                                                                                                                             |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Container App `ca-evex-jira-ui`     | Streamlit with exactly one always-on replica: the import worker is an in-process thread and the cache locks assume a single process |
+| Share `jira-data` on `stevexjiraui` | Mounted at `/app/data`: ticket cache, checkpoints, `import_status.json`, backups                                                    |
+| Key Vault `kv-evex-jira-ui`         | `JIRA_USERNAME`, `JIRA_PASSWORD`, `UI_PASSWORD`                                                                                     |
+| Container Registry `crevexjiraui`   | Images, built in Azure (`remoteBuild`), so no local amd64 build is needed                                                           |
+| Environment `cae-evex-jira-ui`      | Consumption workload profile; logs to Log Analytics `log-evex-jira-ui`                                                              |
 
-The app runs in the shared Container Apps environment `cae-evex` (resource group
-`evex_customer_support`, managed by Terraform there), because creating a dedicated
-environment in Germany West Central failed for lack of regional capacity. Container
-logs therefore go to that environment's Log Analytics workspace. The deployment adds
-one storage definition, `jira-ui-data`, to `cae-evex` and changes nothing else there;
-`azd down` does not remove it.
+Names derive from the Bicep parameter `baseName` (`evex-jira-ui`).
+
+An interim deployment still runs in "Azure subscription 1" (azd environment
+`evex-jira-ui`), inside the shared environment `cae-evex` of `evex_customer_support`
+(Terraform-managed there; this repository only adds the storage definition
+`jira-ui-data`, which `azd down` does not remove). Its resources carry the old
+generated names, so do not run `azd provision -e evex-jira-ui`: the readable names would
+create a second set. It is to be removed once the West Europe deployment is accepted.
 
 Required azd environment values:
 
@@ -98,7 +106,7 @@ provisioning writes the secrets to Key Vault. First deployment:
 ```sh
 az login --tenant eb15ebac-a9e7-43c7-bd1c-b99f13afdda9
 azd auth login --tenant-id eb15ebac-a9e7-43c7-bd1c-b99f13afdda9
-azd env new evex-jira-ui --subscription c3f253c2-c792-4a6e-878e-c5d49e589d6c --location germanywestcentral
+azd env new evex-jira-ui-n8n --subscription f00b24a2-fd7a-4437-adaf-5b38e6da5018 --location westeurope
 azd env set JIRA_URL https://amparex.atlassian.net
 azd env set JIRA_USERNAME <user>
 azd env set JIRA_PASSWORD <api-token>
